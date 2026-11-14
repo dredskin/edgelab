@@ -36,6 +36,14 @@ risk:
     calm_below: 0.6             # full exposure while fragility score < 0.6
     floor: 0.25                 # never below 25% of normal exposure
 
+broker:
+  provider: alpaca
+  base_url: https://paper-api.alpaca.markets   # PAPER. Non-paper URLs are refused unless allow_live: true
+  allow_live: false
+  allow_shorts: false           # long-only by default; shorting small-caps is costly and risky
+  min_order_dollars: 100
+  dry_run: false                # true = print orders without sending
+
 signals:
   insider_cluster: {enabled: true, min_cluster: 2, horizon: 20}
   earnings_drift:  {enabled: true, min_abs_score: 0.4, horizon: 20}

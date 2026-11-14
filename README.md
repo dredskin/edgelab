@@ -77,6 +77,17 @@ and be patient. That wait is the point.
 **Contamination rule:** the LLM refuses any document dated on or before `llm.training_cutoff`. Never backtest LLM
 signals on older text. Set the cutoff to your model's published training cutoff.
 
+## Broker: Alpaca paper trading
+
+1. Create a free Alpaca account and open the **paper trading** dashboard to generate API keys.
+2. `export APCA_API_KEY_ID=...` and `export APCA_API_SECRET_KEY=...`
+3. `edgelab broker` shows the paper account; `edgelab daily --execute` exits positions whose horizon has passed,
+   then sends today's sized orders.
+
+Safeguards: non-paper endpoints are refused unless `broker.allow_live: true`; long-only unless
+`broker.allow_shorts: true`; whole-share market orders; EdgeLab only closes positions it opened; set
+`broker.dry_run: true` to print orders without sending. Existing EdgeLab positions count against the gross limit.
+
 ## The app (desktop and mobile)
 
 The dashboard (`web/`) is an installable Progressive Web App that talks only to the JSON API:
@@ -107,7 +118,7 @@ against the false-discovery budget, which is intended.
 ## Roadmap
 
 1. **Herding fade, intraday:** timestamped news API + minute bars; fade within minutes instead of at the next open.
-2. **Broker adapter:** Alpaca paper API for realistic fills, then optionally live with tiny size.
+2. **Interactive Brokers adapter:** same interface as Alpaca, paper account first (TWS / IB Gateway).
 3. **More signals from the matrices:** cross-border supply chain, government contracts, post-cascade rebound,
    tax-loss rebound, attention exhaustion.
 4. **Synthetic-history stress lab:** run every promoted signal through thousands of generated market histories.
