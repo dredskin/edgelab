@@ -76,14 +76,21 @@ class Tournament:
             i = idx.get(asof)
             if i is None or i + 1 >= len(dates) or tk not in cols:
                 continue
-            px = O[i + 1, cols[tk]]
-            if not np.isfinite(px):
-                px = C[i + 1, cols[tk]]
-            if not np.isfinite(px) or px <= 0:
-                self.db.execute("UPDATE picks SET state='void' WHERE id=?", (pid,))
+            # First session after the signal on which this stock actually trades (markets have different
+            # holidays, so a global panel has gaps). Give up after 5 sessions without a price.
+            k, px = None, float("nan")
+            for k in range(i + 1, min(i + 6, len(dates))):
+                px = O[k, cols[tk]]
+                if not np.isfinite(px):
+                    px = C[k, cols[tk]]
+                if np.isfinite(px) and px > 0:
+                    break
+            if not (np.isfinite(px) and px > 0):
+                if i + 6 <= len(dates):
+                    self.db.execute("UPDATE picks SET state='void' WHERE id=?", (pid,))
                 continue
             self.db.execute("UPDATE picks SET entry_date=?, entry_price=?, bench_entry=?, state='open' WHERE id=?",
-                            (dates[i + 1].strftime("%Y-%m-%d"), float(px), float(bench[i]), pid))
+                            (dates[k].strftime("%Y-%m-%d"), float(px), float(bench[k - 1]), pid))
 
         for pid, tk, d, h, e_date, e_px, b0 in self.db.execute(
                 "SELECT id, ticker, direction, horizon, entry_date, entry_price, bench_entry FROM picks WHERE state='open'").fetchall():
@@ -94,6 +101,9 @@ class Tournament:
             if j >= len(dates):
                 continue
             x = C[j, cols[tk]]
+            while not np.isfinite(x) and j + 1 < len(dates) and j < i + h + 4:   # local holiday on exit day
+                j += 1
+                x = C[j, cols[tk]]
             if not np.isfinite(x):
                 continue
             raw = x / e_px - 1

@@ -1,5 +1,5 @@
 // Offline shell: cache the app; always try the network first for data.
-const SHELL = "edgelab-v1";
+const SHELL = "edgelab-v2";
 self.addEventListener("install", e => e.waitUntil(caches.open(SHELL).then(c => c.addAll(["/", "/manifest.webmanifest", "/icon.svg"]))));
 self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);

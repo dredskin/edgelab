@@ -9,7 +9,7 @@ class EarningsDrift(Signal):
     def generate(self, ctx):
         picks = []
         for e in ctx.events.on("earnings", ctx.asof):
-            if e.ticker not in ctx.prices.close.columns:
+            if e.ticker not in ctx.prices.close.columns or not self.in_scope(e.ticker):
                 continue
             try:
                 s = ctx.llm.score_earnings(e)

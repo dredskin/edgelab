@@ -17,18 +17,51 @@ from .config import load_config
 
 
 def build_signals(cfg, demo=False):
+    from .lab.global_signals import Buyback, LargeStake, SupplyChainRead
     from .lab.herding_fade import HerdingFade
     from .signals.earnings_drift import EarningsDrift
     from .signals.insider import InsiderCluster
     from .signals.spinoff import SpinoffOrphan
-    table = {"insider_cluster": InsiderCluster, "earnings_drift": EarningsDrift, "spinoff_orphan": SpinoffOrphan}
-    out = [cls(cfg["signals"][k]) for k, cls in table.items() if cfg["signals"].get(k, {}).get("enabled")]
-    if cfg["lab"]["herding_fade"].get("enabled"):
-        out.append(HerdingFade(cfg["lab"]["herding_fade"]))
+    from .sources.asia import load_supply_chain
+    sig, lab = cfg["signals"], cfg["lab"]
+    on = lambda block, k: block.get(k, {}).get("enabled")
+    out = []
+    # Core (US) signals. In the synthetic demo there is one market, so no scope filter.
+    scope = {} if demo else {"scope": "us"}
+    if on(sig, "insider_cluster"):
+        out.append(InsiderCluster({**sig["insider_cluster"], **scope}))
+    if on(sig, "earnings_drift"):
+        out.append(EarningsDrift({**sig["earnings_drift"], **scope}))
+    if on(sig, "spinoff_orphan"):
+        out.append(SpinoffOrphan(sig["spinoff_orphan"]))
+    # Lab signals: stricter promotion bar.
+    if on(lab, "herding_fade"):
+        out.append(HerdingFade(lab["herding_fade"]))
     if demo:
         from .synthetic import Decoy
-        out += [Decoy(k, 100 + k) for k in range(3)]
+        return out + [Decoy(k, 100 + k) for k in range(3)]
+    # International versions are separate tournament entries, judged on their own record.
+    if on(lab, "earnings_drift_intl"):
+        out.append(EarningsDrift({**lab["earnings_drift_intl"], "name": "earnings_drift_intl", "lab": True, "scope": "intl"}))
+    if on(lab, "insider_intl"):
+        out.append(InsiderCluster({**lab["insider_intl"], "name": "insider_intl", "lab": True, "scope": "intl"}))
+    if on(lab, "large_stake"):
+        out.append(LargeStake(lab["large_stake"]))
+    if on(lab, "buyback"):
+        out.append(Buyback(lab["buyback"]))
+    if on(lab, "supply_chain"):
+        out.append(SupplyChainRead(lab["supply_chain"], load_supply_chain(cfg)))
     return out
+
+
+def build_sources(cfg, db):
+    from .sources.announcements import AnnouncementSource
+    from .sources.asia import DartSource, TaiwanSalesSource
+    from .sources.japan import EdinetSource, TdnetSource
+    from .sources.us import EdgarSource
+    table = {"edgar": EdgarSource, "edinet": EdinetSource, "tdnet": TdnetSource, "taiwan_sales": TaiwanSalesSource,
+             "dart": DartSource, "announcements": AnnouncementSource}
+    return [cls(cfg, cfg["sources"][k], db) for k, cls in table.items() if cfg.get("sources", {}).get(k, {}).get("enabled")]
 
 
 def cmd_demo(cfg, args):
@@ -86,9 +119,8 @@ def cmd_report(cfg, args):
 
 
 def cmd_daily(cfg, args):
-    from .data.edgar import EdgarClient
-    from .data.events import EventStore
     from .data.prices import load_yfinance
+    from .sources.base import run_sources
     from .lab.headlines import fetch_headlines
     from .llm.client import LLMClient
     from .runner import Runner
@@ -102,17 +134,15 @@ def cmd_daily(cfg, args):
     panel = load_yfinance(uni + ([bench] if bench else []),
                           start=date - pd.Timedelta(days=int(cfg["universe"]["history_days"] * 1.5)),
                           end=date + pd.Timedelta(days=1))
-    ed = EdgarClient(cfg["sec"]["user_agent"], db)
-    events = EventStore()
+    llm = LLMClient(cfg)
     universe = set(uni)
-    events.extend(ed.insider_events(date, universe))
-    events.extend(ed.earnings_events(date, universe))
-    events.extend(ed.spinoff_events(date, panel))
+    print(f"{date.date()}: {len(universe)} stocks in universe, {panel.close.shape[1]} with prices")
+    events = run_sources(build_sources(cfg, db), date, universe, panel, db, llm)
     events.extend(fetch_headlines(cfg["lab"]["herding_fade"].get("feeds", []), date, universe))
-    print(f"{date.date()}: {events.count('insider_buy')} insider, {events.count('earnings')} earnings, "
-          f"{events.count('spinoff_listed')} spin-off, {events.count('headline')} headline events")
+    kinds = ["insider_buy", "earnings", "spinoff_listed", "large_stake", "buyback", "monthly_sales", "headline"]
+    print("  events: " + ", ".join(f"{events.count(k)} {k}" for k in kinds if events.count(k)) or "  events: none")
 
-    run = Runner(cfg, build_signals(cfg), LLMClient(cfg), db, eval_every=1)
+    run = Runner(cfg, build_signals(cfg), llm, db, eval_every=1)
     # warm the risk layer on history, then run today
     i_today = len(panel.dates) - 1
     for i in range(max(1, i_today - 120), i_today):

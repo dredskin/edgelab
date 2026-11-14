@@ -19,6 +19,15 @@ of a 13-expert design review. They are the point of the project, so follow them 
 6. **Costs and benchmark are always on.** Report excess return net of `costs_bps_per_side`, vs the benchmark.
 7. **Treat great results as bugs first.** If a change makes performance jump, look for leakage before celebrating.
 
+## Data-source rules
+
+- Date every event by when it became public (or when EdgeLab first saw it), never the period it describes.
+- Sources only fetch and shape data. Whether an event type predicts returns is the tournament's job.
+- A new market for an existing idea is a NEW tournament entry (e.g. `earnings_drift_intl`), `lab = True`.
+  Never widen an existing signal's scope in place: it would mix track records.
+- Source adapters are tested with fixtures in `tests/test_sources.py`. When a live format differs, fix the
+  parser and add the real shape to the fixture.
+
 ## Risk rules
 
 - Survival before returns: keep the fragility thermometer, quarter-Kelly cap, monthly loss cap and drawdown
@@ -37,10 +46,11 @@ of a 13-expert design review. They are the point of the project, so follow them 
 - The synthetic world (`edgelab/synthetic.py`) has planted edges for testing machinery. Never quote its returns
   as evidence about real markets.
 - Keep the dashboard talking only to `/api/*`, so web, desktop (Tauri) and mobile (Capacitor) wrappers keep working.
-- Secrets live in environment variables (`ANTHROPIC_API_KEY`, `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`), never in files.
+- Secrets live in environment variables (`ANTHROPIC_API_KEY`, `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`, `EDINET_API_KEY`, `DART_API_KEY`), never in files.
 
 ## Layout
 
-`edgelab/signals/` core signals · `edgelab/lab/` experimental signals · `edgelab/tournament/` ledger and stats ·
+`edgelab/signals/` core signals · `edgelab/lab/` experimental signals · `edgelab/sources/` data sources by region ·
+`edgelab/markets.py` world market table · `edgelab/tournament/` ledger and stats ·
 `edgelab/risk/` fragility and sizing · `edgelab/broker.py` Alpaca + Interactive Brokers (paper) · `edgelab/api.py` + `web/` dashboard ·
 `edgelab/cli.py` commands

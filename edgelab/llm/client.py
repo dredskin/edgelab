@@ -72,6 +72,32 @@ Return ONLY a JSON object (English values):
 
 HEADLINE AND SNIPPET:
 {text}""",
+    "announce_v2": """You are sorting a corporate announcement (any language) into a category for a research system.
+Read it in the original language.
+
+Return ONLY a JSON object (English values):
+{{"language": "<ISO 639-1 code>",
+  "kind": "<one of: earnings | insider_buy | buyback | large_stake | other>",
+  "exchange": "<exchange label if stated, e.g. LSE, HKEX, TSX, TSXV, ASX, XETRA; else empty>",
+  "symbol": "<ticker/stock code if stated; else empty>",
+  "n_insiders": <for insider_buy: number of distinct directors/officers who BOUGHT shares; else 0>,
+  "first_purchase": <true only if the text says this is the person's first purchase; else false>}}
+
+Definitions: earnings = results or guidance/forecast changes. insider_buy = directors/officers/PDMRs buying
+shares on the open market (not option exercises, grants or sales). buyback = the company decides to
+repurchase its own shares (not progress updates). large_stake = an outside holder crosses or raises a
+disclosed stake (e.g. 5%). Everything else = other.
+
+ANNOUNCEMENT:
+{text}""",
+    "buyback_v2": """Read this share-buyback announcement (any language) and extract its size.
+
+Return ONLY a JSON object:
+{{"pct_of_shares": <maximum shares to be repurchased as a percentage of shares outstanding, e.g. 3.2; 0 if not stated>,
+  "confidence": <0.0 to 1.0>}}
+
+ANNOUNCEMENT:
+{text}""",
 }
 
 
@@ -93,7 +119,10 @@ class LLMClient:
             raise ContaminationError(f"document {doc_date} is before model cutoff {self.cutoff.date()}")
 
     def _ask(self, prompt_key: str, text: str) -> dict:
-        prompt = PROMPTS[f"{prompt_key}_{self.version}"].format(text=text)
+        name = f"{prompt_key}_{self.version}"
+        if name not in PROMPTS:                    # prompts introduced later than the configured version
+            name = sorted(k for k in PROMPTS if k.startswith(prompt_key + "_"))[0]
+        prompt = PROMPTS[name].format(text=text)
         key = hashlib.sha256(f"{self.model}|{self.temperature}|{prompt}".encode()).hexdigest()
         f = self.cache / f"{key}.json"
         if f.exists():
@@ -120,6 +149,16 @@ class LLMClient:
         self.guard(event.date)
         out = self._ask("headline", event.payload["text"])
         return {"substance": float(out.get("substance", 1.0))}
+
+
+    def classify_announcement(self, text: str, doc_date) -> dict:
+        self.guard(doc_date)
+        return self._ask("announce", text[:6000])
+
+    def buyback_size(self, event) -> dict:
+        self.guard(event.date)
+        out = self._ask("buyback", event.payload.get("text", "")[:8000])
+        return {"pct_of_shares": float(out.get("pct_of_shares") or 0), "confidence": float(out.get("confidence") or 0)}
 
 
 class MockLLM(LLMClient):

@@ -57,6 +57,10 @@ def create_app(cfg: dict, db_path=None) -> FastAPI:
     def orders(limit: int = 100):
         return q("SELECT * FROM orders ORDER BY date DESC LIMIT ?", (limit,))
 
+    @app.get("/api/sources")
+    def sources(limit: int = 60):
+        return q("SELECT * FROM source_log ORDER BY date DESC, source LIMIT ?", (limit,))
+
     if WEB.exists():
         app.mount("/static", StaticFiles(directory=WEB), name="static")
 

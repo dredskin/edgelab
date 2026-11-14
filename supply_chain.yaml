@@ -1,0 +1,9 @@
+# Supplier -> customers. When a supplier's sales or earnings move, the supply_chain lab signal trades its customers.
+# Suppliers can be in research-only markets (Taiwan .TW/.TWO, Korea .KS/.KQ); customers must be in universe.txt.
+# These are illustrative starting points. Verify each relationship (annual reports list major customers)
+# and build this out: the quality of this map IS the edge.
+#
+# 2330.TW:  [NVDA, AAPL, AMD]        # TSMC -> its largest fabless customers
+# 2317.TW:  [AAPL]                   # Hon Hai (Foxconn) -> Apple
+# 3008.TW:  [AAPL]                   # Largan (camera lenses) -> Apple
+# 000660.KS: [NVDA]                  # SK Hynix (HBM memory) -> Nvidia

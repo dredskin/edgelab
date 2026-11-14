@@ -57,7 +57,24 @@ signals:
   earnings_drift:  {enabled: true, min_abs_score: 0.4, horizon: 20}
   spinoff_orphan:  {enabled: true, wait_days: 10, min_drop: 0.05, horizon: 30}
 
+# Data sources. Each one that is enabled runs every day; a failing source is logged and skipped.
+sources:
+  edgar:         {enabled: true}              # US: Form 4, 8-K, Form 10 (no key)
+  edinet:        {enabled: false}             # Japan large-stake filings; needs EDINET_API_KEY (free)
+  tdnet:         {enabled: false}             # Japan earnings, forecast revisions, buybacks (community mirror)
+  taiwan_sales:  {enabled: false}             # Taiwan monthly revenue for suppliers in supply_chain.yaml (no key)
+  dart:          {enabled: false}             # Korea preliminary earnings, buybacks; needs DART_API_KEY (free)
+  announcements:                              # any RSS/Atom feed, any language; Claude classifies each item
+    enabled: false
+    feeds: []                                 # e.g. [{url: "https://...", default_suffix: ".L"}]
+supply_chain_file: supply_chain.yaml
+
 lab:
+  earnings_drift_intl: {enabled: true, min_abs_score: 0.4, horizon: 20}
+  insider_intl:        {enabled: true, min_cluster: 1, horizon: 20}
+  large_stake:         {enabled: true, min_increase: 1.0, horizon: 30}   # stake up by >= 1 percentage point
+  buyback:             {enabled: true, min_pct: 1.0, horizon: 20}        # >= 1% of shares outstanding
+  supply_chain:        {enabled: true, min_accel: 0.10, min_abs_score: 0.5, horizon: 20}
   herding_fade:
     enabled: true
     gap_sigma: 2.0              # move must exceed 2x recent daily volatility

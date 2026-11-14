@@ -77,6 +77,7 @@
   <section class="view" id="activity">
     <h2>Status changes</h2><div class="card scroll"><table id="logT"></table></div>
     <h2>Recent paper orders</h2><div class="card scroll"><table id="ordT"></table></div>
+    <h2>Data sources</h2><div class="card scroll"><table id="srcT"></table></div>
   </section>
 </main>
 <script>
@@ -114,8 +115,8 @@ function table(el, cols, rows, onclick){
 const chip = s => `<span class="chip ${s.status}">${s.status}</span>${s.lab?'<span class="chip lab">lab</span>':""}`;
 
 async function load(){
-  const [sum, daily, sigs, log, orders] = await Promise.all(
-    ["/api/summary","/api/daily","/api/signals","/api/log","/api/orders"].map(get));
+  const [sum, daily, sigs, log, orders, sources] = await Promise.all(
+    ["/api/summary","/api/daily","/api/signals","/api/log","/api/orders","/api/sources"].map(get));
   const m = sum.meta || {}, L = sum.latest || {};
   $("#mode").textContent = m.kind === "demo" ? "synthetic demo" : "live paper";
   $("#asof").textContent = L.date ? "as of " + L.date : "";
@@ -157,6 +158,8 @@ async function load(){
   table($("#logT"), [["Date", r=>r.date], ["Signal", r=>r.signal], ["Change", r=>`${r.old} → <span class="chip ${r.new}">${r.new}</span>`], ["Why", r=>`<span class="muted">${r.reason}</span>`]], log);
   table($("#ordT"), [["Date", r=>r.date], ["Ticker", r=>r.ticker], ["Side", r=>r.weight>0?'<span class="pos">BUY</span>':'<span class="neg">SELL</span>'],
      ["Size", r=>pct(Math.abs(r.weight),2)], ["Signal", r=>r.signal], ["Why", r=>`<span class="muted">${r.rationale}</span>`]], orders);
+  table($("#srcT"), [["Date", r=>r.date], ["Source", r=>r.source], ["Events", r=>r.events],
+     ["Status", r=>r.error?`<span class="neg">${r.error}</span>`:'<span class="pos">ok</span>']], sources);
 }
 
 const tradeCols = [["Ticker", t=>t.ticker], ["Side", t=>t.direction>0?"Long":"Short"], ["Signal date", t=>t.asof],

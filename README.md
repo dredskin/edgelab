@@ -12,6 +12,7 @@ An experimental **lab** (starting with the AI-herding fade) runs in the same tou
 ## Architecture
 
 ```
+ Sources: US EDGAR · Japan EDINET/TDnet · Taiwan sales · Korea DART · any-language announcement feeds
  SEC EDGAR (Form 4, 8-K, 10-12B) ─┐
  Prices (yfinance)               ├─► Events ─► Signals ─────────────► Tournament ──► promoted signals
  Headline feeds (RSS)            ┘    │        insider_cluster          paper ledger      │
@@ -127,6 +128,38 @@ Put any Yahoo-style ticker in `universe.txt`: `7203.T` (Tokyo), `0700.HK` (Hong 
 **Live trading is deliberately not switched on.** When signals have a real forward track record, it should be
 an explicit decision with small size and extra limits (daily loss cap, maximum order size).
 
+## International data sources
+
+Turn sources on in `config.yaml` under `sources:`. Each one runs every day; a source that fails is logged
+(dashboard → Activity → Data sources) and skipped, never fatal.
+
+| Source | Market | What it reads | Needs |
+|---|---|---|---|
+| `edgar` | US | Form 4 insider buys, 8-K earnings, spin-off registrations | nothing |
+| `edinet` | Japan | Large shareholding reports (大量保有報告書): who is building a 5%+ stake, and why | `EDINET_API_KEY` (free) |
+| `tdnet` | Japan | Earnings (決算短信), forecast revisions (業績予想の修正), buyback decisions | nothing (community mirror; see note) |
+| `taiwan_sales` | Taiwan | Monthly revenue for suppliers in `supply_chain.yaml` | nothing |
+| `dart` | Korea | Preliminary earnings, buyback decisions | `DART_API_KEY` (free) |
+| `announcements` | anywhere | Any RSS/Atom feed in any language: Claude sorts each item into earnings / insider buy / buyback / large stake | feed URLs |
+
+New lab signals fed by these (all experimental, judged separately from the US ones):
+
+- `earnings_drift_intl`, `insider_intl`: the core ideas outside the US, each with its own track record.
+- `large_stake`: a holder discloses a new or increased stake; stronger when the stated purpose is activist.
+- `buyback`: a company decides to repurchase shares; Claude extracts the size.
+- `supply_chain`: a supplier's sales accelerate or its earnings surprise → trade its **customers**.
+  Edit `supply_chain.yaml`; that map is where the edge lives.
+
+Notes:
+- **Dating:** every event is dated when it became public (or when EdgeLab first saw it), never the period it
+  describes. Taiwan's October sales seen on Nov 10 are a Nov 10 event.
+- **TDnet** has no free official API. The default list URL is a community mirror; set `sources.tdnet.list_url`
+  to a licensed feed for anything serious.
+- For the UK (RNS), Hong Kong (HKEXnews), Canada (newswires), Europe and Australia, add announcement feeds with a
+  `default_suffix` (e.g. `{url: "...", default_suffix: ".L"}`) so bare stock codes resolve to the right market.
+- These adapters are tested against sample responses shaped like each provider's format, not against the live
+  services. Expect to adjust field names on first contact; the source-health table shows what broke.
+
 ## The app (desktop and mobile)
 
 The dashboard (`web/`) is an installable Progressive Web App that talks only to the JSON API:
@@ -158,7 +191,7 @@ against the false-discovery budget, which is intended.
 
 1. **Herding fade, intraday:** timestamped news API + minute bars; fade within minutes instead of at the next open.
 2. **Live-trading gate:** per-order and daily loss limits plus a confirmation step before `allow_live` can be used.
-3. **More signals from the matrices:** cross-border supply chain, government contracts, post-cascade rebound,
-   tax-loss rebound, attention exhaustion.
+3. **More signals from the matrices:** government contracts, post-cascade rebound, tax-loss rebound,
+   attention exhaustion. **More sources:** Canada SEDI insider reports, HKEXnews and UK RNS direct adapters.
 4. **Synthetic-history stress lab:** run every promoted signal through thousands of generated market histories.
 5. **Policy-risk layer:** flag tariff, sanction and regulatory exposure (political scientist's ask).

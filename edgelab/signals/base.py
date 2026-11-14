@@ -27,6 +27,15 @@ class Signal(ABC):
 
     def __init__(self, params: dict):
         self.p = params
+        # One class can run as several tournament entries (e.g. US vs international), each judged separately.
+        self.name = params.get("name", self.name)
+        self.lab = params.get("lab", self.lab)
+        self.scope = params.get("scope", "all")        # all | us | intl
+
+    def in_scope(self, ticker: str) -> bool:
+        from ..markets import market
+        us = market(ticker)["suffix"] == ""
+        return self.scope == "all" or (self.scope == "us") == us
 
     @abstractmethod
     def generate(self, ctx: Context) -> list:
