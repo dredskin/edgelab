@@ -12,7 +12,7 @@ instead of at the next open, which is where most of this edge likely sits.
 """
 import numpy as np
 
-from ..llm.client import ContaminationError
+from ..llm.client import LLMError
 from ..signals.base import Pick, Signal
 
 
@@ -39,7 +39,8 @@ class HerdingFade(Signal):
                 continue
             try:
                 s = ctx.llm.score_headline(e)
-            except ContaminationError:
+            except LLMError as e:
+                ctx.skipped(e)
                 continue
             if s["substance"] > self.p.get("max_substance", 0.35):
                 continue                      # real news: don't fade it

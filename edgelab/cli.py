@@ -1,19 +1,39 @@
 """EdgeLab command line.
 
   edgelab demo                 run the full system on a synthetic market (no keys, no internet)
-  edgelab daily [--date D]     live paper-trading day: pull SEC filings + prices, record picks, print orders
-  edgelab daily --execute      ...and send them to your broker's PAPER account (Alpaca or Interactive Brokers) (exits expired positions first)
+  edgelab daily [--date D]     one live paper-trading session: fetch prices and filings, record picks, size orders
+  edgelab daily --execute      ...and send the orders to your broker's PAPER account (Alpaca or Interactive Brokers)
+  edgelab backfill --days N    collect past insider purchases so "first purchase" flags can be trusted
   edgelab broker               broker paper account and EdgeLab-managed positions
-  edgelab report               signal leaderboard and status changes
+  edgelab report               signal leaderboard and status changes (read-only)
   edgelab serve                start the dashboard / API (http://localhost:8000)
 """
 import argparse
 import json
+import os
+import sys
 from pathlib import Path
 
 import pandas as pd
 
 from .config import load_config
+
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+# ---------- wiring ----------
+def db_path(cfg, args) -> str:
+    return getattr(args, "db", None) or str(Path(cfg["_root"]) / cfg["storage"])
+
+
+def read_universe(cfg) -> list:
+    path = Path(cfg["_root"]) / cfg["universe"]["tickers_file"]
+    out = []
+    for line in path.read_text().splitlines():
+        t = line.split("#")[0].strip().upper()
+        if t and t not in out:
+            out.append(t)
+    return out
 
 
 def build_signals(cfg, demo=False):
@@ -64,6 +84,21 @@ def build_sources(cfg, db):
     return [cls(cfg, cfg["sources"][k], db) for k, cls in table.items() if cfg.get("sources", {}).get(k, {}).get("enabled")]
 
 
+LEADERBOARD = ["name", "lab", "status", "n", "weeks", "mean", "hit", "t", "q", "next_review"]
+
+
+def print_report(df, log):
+    if df.empty or df["n"].isna().all():
+        print("No signals evaluated yet.")
+        return
+    print("\nSignal leaderboard (excess return per trade, net of costs; t clustered by entry week)")
+    print(df[LEADERBOARD].sort_values("t", ascending=False).to_string(index=False, float_format=lambda x: f"{x:.3f}"))
+    if not log.empty:
+        print("\nStatus changes")
+        print(log.to_string(index=False))
+
+
+# ---------- commands ----------
 def cmd_demo(cfg, args):
     from .llm.client import MockLLM
     from .runner import Runner, performance
@@ -83,133 +118,157 @@ def cmd_demo(cfg, args):
     daily = pd.DataFrame(run.daily).set_index("date")
     ew = (1 + panel.close.pct_change(fill_method=None).mean(axis=1).fillna(0)).cumprod()
     perf, bench = performance(daily["equity"]), performance(ew.iloc[1:])
-    _print_report(df, run.tour.log())
-    print("\nPaper book vs equal-weight market")
+    print_report(df, run.tour.log())
+    print("\nPaper book vs equal-weight market (synthetic: shows the machinery works, says nothing about real markets)")
     for k in ["total", "cagr", "vol", "sharpe", "max_dd"]:
         print(f"  {k:7s} book {perf[k]:+8.2%}   market {bench[k]:+8.2%}" if k != "sharpe"
               else f"  {k:7s} book {perf[k]:8.2f}   market {bench[k]:8.2f}")
     print(f"\nLLM contamination guard refused {run.llm.refused} pre-cutoff documents")
     s = daily.loc[truth["stress"][0].strftime("%Y-%m-%d"):truth["stress"][1].strftime("%Y-%m-%d")]
-    print(f"Stress window: mean fragility {s.fragility.mean():.2f} (rest {daily.fragility.mean():.2f}), "
-          f"mean risk multiplier {s.risk_mult.mean():.2f}")
+    print(f"Stress window: mean fragility {s.fragility.mean():.2f} (whole run {daily.fragility.mean():.2f}), "
+          f"mean size multiplier for new positions {s.risk_mult.mean():.2f}")
     meta = dict(kind="demo", stress=[str(truth["stress"][0].date()), str(truth["stress"][1].date())],
                 decay_from=str(truth["decay_from"].date()), cutoff=str(cutoff.date()), performance=perf, benchmark=bench,
                 bench_curve=[round(float(v), 5) for v in (ew.iloc[1:] / ew.iloc[1]).values])
-    run.tour.db.execute("INSERT OR REPLACE INTO meta VALUES('run', ?)", (json.dumps(meta),))
-    run.tour.db.commit()
+    run.db.execute("INSERT OR REPLACE INTO meta VALUES('run', ?)", (json.dumps(meta),))
+    run.db.commit()
     print(f"\nSaved {db}. Run `edgelab serve --db {db}` to explore it in the dashboard.")
-
-
-def _print_report(df, log):
-    if df.empty:
-        print("No signals evaluated yet.")
-        return
-    cols = ["name", "lab", "status", "n", "mean", "hit", "t", "q", "recent_t"]
-    print("\nSignal leaderboard (excess return per trade, net of costs)")
-    print(df[cols].sort_values("t", ascending=False).to_string(index=False, float_format=lambda x: f"{x:.3f}"))
-    if not log.empty:
-        print("\nStatus changes")
-        print(log.to_string(index=False))
 
 
 def cmd_report(cfg, args):
     from .tournament.engine import Tournament
-    t = Tournament(args.db or cfg["storage"], cfg)
-    _print_report(t.evaluate(pd.Timestamp.today()), t.log())
+    t = Tournament(db_path(cfg, args), cfg)
+    print_report(t.leaderboard(), t.log())
 
 
 def cmd_daily(cfg, args):
+    from . import markets
     from .data.prices import load_yfinance
-    from .sources.base import run_sources
     from .lab.headlines import fetch_headlines
+    from .live import run_session
     from .llm.client import LLMClient
-    from .runner import Runner
+    from .sources.base import run_sources
+    from .tournament.engine import Tournament
 
-    root = Path(cfg["_root"])
-    db = args.db or str(root / cfg["storage"])
-    date = pd.Timestamp(args.date or pd.Timestamp.today().normalize())
-    uni = [l.split("#")[0].strip().upper() for l in (root / cfg["universe"]["tickers_file"]).read_text().splitlines()
-           if l.split("#")[0].strip()]
-    bench = cfg["universe"].get("benchmark")
-    panel = load_yfinance(uni + ([bench] if bench else []),
+    db = db_path(cfg, args)
+    date = pd.Timestamp(args.date or pd.Timestamp.today()).normalize()
+    universe = read_universe(cfg)
+    if not universe:
+        sys.exit(f"{cfg['universe']['tickers_file']} is empty: list the stocks you want EdgeLab to cover")
+    sources = build_sources(cfg, db)
+
+    # Prices are needed for the universe, for each market's benchmark, for stocks with trades still open
+    # (even if they have left the universe), and for newly listed spin-offs the sources are watching.
+    tour = Tournament(db, cfg)
+    in_play = {markets.suffix(t) for t in universe}
+    benches = {b for b in [cfg["universe"].get("benchmark")] if b and "" in in_play}
+    benches |= {b for suf, b in tour.bench_by_market.items() if suf in in_play}
+    extra = tour.open_tickers()
+    tour.db.close()
+    for s in sources:
+        extra |= s.extra_tickers(date)
+    panel = load_yfinance(sorted(set(universe) | benches | extra),
                           start=date - pd.Timedelta(days=int(cfg["universe"]["history_days"] * 1.5)),
                           end=date + pd.Timedelta(days=1))
+    if panel.close.empty:
+        sys.exit("no prices could be downloaded: check your internet connection and the tickers in the universe file")
+    session = panel.dates[-1]
+    print(f"{date.date()}: {len(universe)} stocks in universe, {panel.close.shape[1]} with prices, "
+          f"latest session {session.date()}")
+    if (date - session).days > 4:
+        print(f"  ! latest prices are from {session.date()}: is the date right, and is the price feed working?")
+
     llm = LLMClient(cfg)
-    universe = set(uni)
-    print(f"{date.date()}: {len(universe)} stocks in universe, {panel.close.shape[1]} with prices")
-    events = run_sources(build_sources(cfg, db), date, universe, panel, db, llm)
-    events.extend(fetch_headlines(cfg["lab"]["herding_fade"].get("feeds", []), date, universe))
-    kinds = ["insider_buy", "earnings", "spinoff_listed", "large_stake", "buyback", "monthly_sales", "headline"]
-    print("  events: " + ", ".join(f"{events.count(k)} {k}" for k in kinds if events.count(k)) or "  events: none")
+    fetched = run_sources(sources, date, set(universe), panel, db, llm).all()
+    fetched += fetch_headlines(cfg["lab"]["herding_fade"].get("feeds", []), date, set(universe))
+    kinds = {}
+    for e in fetched:
+        kinds[e.kind] = kinds.get(e.kind, 0) + 1
+    print("  events: " + (", ".join(f"{n} {k}" for k, n in sorted(kinds.items())) or "none"))
 
-    run = Runner(cfg, build_signals(cfg), llm, db, eval_every=1)
-    # warm the risk layer on history, then run today
-    i_today = len(panel.dates) - 1
-    for i in range(max(1, i_today - 120), i_today):
-        run.thermo.update(panel.upto(panel.dates[i]))
-
-    broker, prices, equity, fx = None, panel.close.ffill().iloc[-1].dropna().to_dict(), None, {}
+    broker, fx = None, {}
     if args.execute:
         from .broker import make_broker
-        broker = make_broker(cfg, db)
-        for tk, q, side in broker.close_expired(date):
-            print(f"  exit: {side.upper()} {q} {tk} (horizon reached)")
-        equity = broker.equity()
-        from . import markets
         from .data.fx import load_fx
-        fx = load_fx({markets.currency(t) for t in prices} | {markets.currency(p["ticker"]) for p in broker.managed()},
-                     broker.base_ccy)
-        held = broker.managed_gross(prices, equity, fx)
-        if held:   # count positions already at the broker against today's gross limit
-            run.book.positions.append(dict(ticker="_held", w=held, start=i_today + 1, end=i_today + 1, signal="_held"))
-        print(f"{broker.name} account equity {equity:,.0f} {broker.base_ccy}; EdgeLab positions use {held:.0%} of it")
+        broker = make_broker(cfg, db)
+        fx = load_fx({markets.currency(t) for t in panel.close.columns}, broker.base_ccy)
+    try:
+        run_session(cfg, db, panel, fetched, llm, build_signals(cfg), broker=broker, fx=fx, force=args.force)
+    finally:
+        if broker and hasattr(broker, "close"):
+            broker.close()
+    if llm.failed:
+        print(f"  ! {llm.failed} LLM call(s) failed. Those documents were skipped; re-run `edgelab daily --date "
+              f"{date.date()}` once the problem is fixed to score them.")
 
-    orders = run.day(i_today, panel, events)
-    print(f"Fragility {run.thermo.score:.2f} -> exposure x{run.daily[-1]['risk_mult']:.2f}")
-    if not orders:
-        print("No paper orders today (no promoted signal fired, or risk layer closed the gate).")
-    for p, w in orders:
-        print(f"  {'BUY ' if w > 0 else 'SELL'} {p.ticker:6s} {abs(w):.2%} of equity  [{p.signal}] {p.rationale}")
-    if broker and orders:
-        for tk, q, side in broker.execute(orders, prices, equity, date, fx):
-            print(f"  sent to {broker.name}: {side.upper()} {q} {tk}")
-    elif orders:
-        print("(paper orders only; add --execute to send them to your broker's paper account)")
-    if broker and hasattr(broker, "close"):
-        broker.close()
+
+def cmd_backfill(cfg, args):
+    from . import markets
+    from .data.edgar import EdgarClient
+
+    if "example.com" in cfg["sec"]["user_agent"]:
+        sys.exit("edit sec.user_agent in config.yaml first: SEC requires a real contact e-mail")
+    universe = {t for t in read_universe(cfg) if markets.suffix(t) == ""}
+    if not universe:
+        sys.exit("no US stocks in the universe file: nothing to backfill")
+    end = pd.Timestamp(args.end or pd.Timestamp.today()).normalize() - pd.Timedelta(days=1)
+    start = end - pd.Timedelta(days=args.days)
+    print(f"Collecting insider purchases for {len(universe)} US stocks, {start.date()} to {end.date()} "
+          f"(no trades are made; this only builds history)")
+    n = EdgarClient(cfg["sec"]["user_agent"], db_path(cfg, args)).backfill_insiders(start, end, universe)
+    print(f"Done: {n} purchases recorded.")
 
 
 def cmd_broker(cfg, args):
     from .broker import make_broker
-    b = make_broker(cfg, args.db or str(Path(cfg["_root"]) / cfg["storage"]))
-    a = b.account()
-    print(f"{b.name} account {a['id']}: equity {a['equity']:,.2f}, cash {a['cash']:,.2f}, status {a['status']}")
-    for p in b.managed():
-        print(f"  {p['side'].upper():4s} {p['qty']:>6} {p['ticker']:6s} [{p['signal']}] opened {p['opened']}, exits {p['exit_on']}")
-    if hasattr(b, "close"):
-        b.close()
+    b = make_broker(cfg, db_path(cfg, args))
+    try:
+        a = b.account()
+        print(f"{b.name} account {a['id']}: equity {a['equity']:,.2f}, cash {a['cash']:,.2f}, status {a['status']}")
+        for p in b.managed():
+            print(f"  {p['side'].upper():4s} {p['qty']:>6} {p['ticker']:10s} [{p['signal']}] opened {p['opened']}, exits {p['exit_on']}")
+    finally:
+        if hasattr(b, "close"):
+            b.close()
 
 
 def cmd_serve(cfg, args):
     import uvicorn
     from .api import create_app
-    uvicorn.run(create_app(cfg, args.db), host=args.host, port=args.port)
+    token = args.token or os.environ.get("EDGELAB_TOKEN")
+    if args.host not in LOOPBACK and not token:
+        sys.exit("Refusing to listen beyond this computer without a token: anyone on the network could read your "
+                 "positions.\nSet one with --token <secret> (or the EDGELAB_TOKEN environment variable), then open "
+                 "the dashboard once as http://<address>:<port>/#token=<secret>")
+    uvicorn.run(create_app(cfg, db_path(cfg, args), token), host=args.host, port=args.port)
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="edgelab")
     ap.add_argument("--config", default="config.yaml")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    d = sub.add_parser("demo"); d.add_argument("--db"); d.add_argument("--seed", type=int, default=42)
-    y = sub.add_parser("daily"); y.add_argument("--date"); y.add_argument("--db")
-    y.add_argument("--execute", action="store_true", help="send orders to the configured broker's PAPER account")
-    b = sub.add_parser("broker"); b.add_argument("--db")
-    r = sub.add_parser("report"); r.add_argument("--db")
-    s = sub.add_parser("serve"); s.add_argument("--db"); s.add_argument("--host", default="127.0.0.1")
-    s.add_argument("--port", type=int, default=8000)
+    p = sub.add_parser("demo")
+    p.add_argument("--db")
+    p.add_argument("--seed", type=int, default=42)
+    p = sub.add_parser("daily")
+    p.add_argument("--date")
+    p.add_argument("--db")
+    p.add_argument("--execute", action="store_true", help="send orders to the configured broker's PAPER account")
+    p.add_argument("--force", action="store_true", help="send orders even if this session was already executed")
+    p = sub.add_parser("backfill")
+    p.add_argument("--days", type=int, default=365)
+    p.add_argument("--end")
+    p.add_argument("--db")
+    for name in ("broker", "report"):
+        sub.add_parser(name).add_argument("--db")
+    p = sub.add_parser("serve")
+    p.add_argument("--db")
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--token", help="require this secret on every API call (needed to listen beyond localhost)")
     a = ap.parse_args(argv)
     cfg = load_config(a.config)
-    {"demo": cmd_demo, "daily": cmd_daily, "report": cmd_report, "serve": cmd_serve,
+    {"demo": cmd_demo, "daily": cmd_daily, "backfill": cmd_backfill, "report": cmd_report, "serve": cmd_serve,
      "broker": cmd_broker}[a.cmd](cfg, a)
 
 

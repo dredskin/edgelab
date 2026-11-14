@@ -20,6 +20,11 @@ class Context:
     llm: object
     notes: dict = field(default_factory=dict)
 
+    def skipped(self, error):
+        """Count a document the LLM layer could not score (pre-cutoff, API failure, ...)."""
+        k = type(error).__name__
+        self.notes[k] = self.notes.get(k, 0) + 1
+
 
 class Signal(ABC):
     name = "base"

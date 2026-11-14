@@ -13,8 +13,8 @@ import pandas as pd
 
 from ..data.events import Event
 from ..lab.headlines import EXCH_SUFFIX, detect_tickers
-from ..llm.client import ContaminationError
-from .base import Source
+from ..llm.client import ContaminationError, LLMError
+from .base import Source, SourceError
 
 ATOM = "{http://www.w3.org/2005/Atom}"
 KINDS = {"earnings", "insider_buy", "buyback", "large_stake"}
@@ -39,25 +39,31 @@ class AnnouncementSource(Source):
         if llm is None:
             return []
         day = pd.Timestamp(date).normalize()
-        events = []
-        for feed in self.scfg.get("feeds", []):
+        events, feeds, failed = [], self.scfg.get("feeds", []), []
+        for feed in feeds:
             feed = {"url": feed} if isinstance(feed, str) else feed
             try:
                 items = parse_feed(self.http.content(feed["url"]))
-            except Exception:
+            except Exception as e:
+                failed.append(f"{feed['url']}: {type(e).__name__}")
                 continue
             for it in items:
                 try:
                     ts = pd.Timestamp(it["when"]).tz_localize(None) if it["when"] else day
                 except Exception:
                     ts = day
-                if ts.normalize() != day or not self.first_time(it["id"] or it["title"]):
+                key = it["id"] or it["title"]
+                if ts.normalize() != day or self.seen(key):
                     continue
                 text = f"{it['title']}\n{it['body'][:3000]}"
                 try:
                     c = llm.classify_announcement(text, day)
                 except ContaminationError:
+                    self.mark(key)                        # pre-cutoff: never readable, do not retry
                     continue
+                except LLMError:
+                    continue                              # temporary failure: try again on the next run
+                self.mark(key)
                 if c.get("kind") not in KINDS:
                     continue
                 tickers = detect_tickers(text)
@@ -73,4 +79,6 @@ class AnnouncementSource(Source):
                     if c["kind"] == "insider_buy":
                         payload.update(cluster=int(c.get("n_insiders") or 1), first_time=bool(c.get("first_purchase")))
                     events.append(Event(c["kind"], day, tk, payload))
+        if failed and len(failed) == len(feeds):          # every feed down: say so in the source-health table
+            raise SourceError("no feed could be read: " + "; ".join(failed)[:200])
         return events

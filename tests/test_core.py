@@ -1,6 +1,10 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
 
 from edgelab.data.edgar import EdgarClient
 from edgelab.data.events import Event
@@ -66,11 +70,19 @@ def test_headline_ticker_detection():
     assert detect_tickers("Acme (NASDAQ: ACME) and Foo (TSXV: FOO.V) partner; $BAR soars") == {"ACME", "FOO.V", "BAR"}
 
 
-def test_end_to_end_demo_promotes_real_edges_and_rejects_decoys(tmp_path):
+def test_end_to_end_demo_promotes_real_edges_retires_decayed_and_rejects_decoys(tmp_path):
+    """The whole lifecycle on the synthetic market, whose edges are planted and therefore known."""
     from edgelab.cli import main
+    import json
     import sqlite3
     db = tmp_path / "t.db"
-    main(["--config", "config.yaml", "demo", "--db", str(db)])
-    st = dict(sqlite3.connect(db).execute("SELECT name, status FROM signals").fetchall())
-    assert all(st[f"decoy_{k}"] != "promoted" for k in range(3))
-    assert st["insider_cluster"] == "promoted" or st["herding_fade"] == "promoted"
+    main(["--config", str(ROOT / "config.yaml"), "demo", "--db", str(db)])
+    con = sqlite3.connect(db)
+    st = dict(con.execute("SELECT name, status FROM signals").fetchall())
+    assert all(st[f"decoy_{k}"] == "candidate" for k in range(3))            # no edge: never promoted
+    assert st["herding_fade"] == "promoted" and st["insider_cluster"] == "promoted"   # lasting edges
+    # the earnings edge is planted to reverse part-way through: promoted while it worked, retired after
+    decay = json.loads(con.execute("SELECT value FROM meta WHERE key='run'").fetchone()[0])["decay_from"]
+    changes = con.execute("SELECT new, date FROM status_log WHERE signal='earnings_drift' ORDER BY date").fetchall()
+    assert [c[0] for c in changes] == ["promoted", "retired"]
+    assert changes[0][1] < decay < changes[1][1]

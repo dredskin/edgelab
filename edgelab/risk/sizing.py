@@ -1,5 +1,4 @@
 """Position sizing and the drawdown budget (mathematician + strategist + rabbi panelists)."""
-import numpy as np
 import pandas as pd
 
 

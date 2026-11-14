@@ -1,17 +1,28 @@
 # EdgeLab configuration
 storage: edgelab.db
 costs_bps_per_side: 30          # small-caps are expensive to trade; be conservative
+costs_bps_by_market:            # markets with extra taxes on trading (approximate; check your broker's schedule)
+  ".L": 55                      # UK stamp duty: 0.5% on purchases (AIM shares are exempt)
+  ".HK": 45                     # Hong Kong stamp duty and levies on both sides
 
 universe:
   tickers_file: universe.txt    # one ticker per line (small/micro-caps you want covered)
-  benchmark: IWM                # Russell 2000 ETF; falls back to equal-weight universe
+  benchmark: IWM                # US benchmark (Russell 2000 ETF)
+  benchmarks:                   # each market is judged against its own benchmark, never against the US one.
+    ".T": 1306.T                # A market without an entry (or whose ticker has no data) is measured against the
+    ".TO": XIC.TO               # average of its own stocks in your universe, if there are at least 8 of them.
+    ".V": XIC.TO
+    ".L": ISF.L
+    ".DE": EXS1.DE
+    ".HK": 2800.HK
+    ".AX": STW.AX
   history_days: 600
 
 llm:
   provider: anthropic           # needs ANTHROPIC_API_KEY in your environment
   model: claude-haiku-5-5       # locked version: never change mid-test without resetting the tournament
   temperature: 0
-  prompt_version: v2           # v2 = multilingual prompts (v1 kept for reproducibility)
+  prompt_version: v3           # v3 = multilingual + documents fenced off as untrusted data (v1, v2 kept for reproducibility)
   training_cutoff: 2026-06-30   # documents dated on/before this are REFUSED (contamination guard)
   cache_dir: .llm_cache
 
@@ -19,8 +30,9 @@ sec:
   user_agent: "EdgeLab research contact@example.com"   # SEC requires a real contact; edit this
 
 tournament:
-  min_trades: 40                # settled paper trades before a signal can be promoted
-  lab_min_trades: 80            # stricter bar for experimental (lab) signals
+  min_trades: 40                # settled paper trades before a signal gets its first review (then at 80, 160, ...)
+  lab_min_trades: 80            # stricter bar for experimental (lab) signals (reviews at 80, 160, 320, ...)
+  min_weeks: 8                  # trades must be spread over at least this many different entry weeks
   fdr_q: 0.10                   # Benjamini-Hochberg false discovery rate
   retire_window: 30             # recent trades checked for decay
   retire_t: -1.0                # retire if recent t-stat falls below this
@@ -33,6 +45,7 @@ risk:
   drawdown_halve_at: 0.15       # halve sizing after a 15% drawdown from peak
   fragility:
     window: 60
+    warm_sessions: 250          # history measured on the very first run, so the gauge has something to rank against
     calm_below: 0.6             # full exposure while fragility score < 0.6
     floor: 0.25                 # never below 25% of normal exposure
 
@@ -53,9 +66,12 @@ broker:
   dry_run: false                # true = print orders without sending
 
 signals:
-  insider_cluster: {enabled: true, min_cluster: 2, horizon: 20}
+  insider_cluster: {enabled: true, min_cluster: 2, horizon: 20, min_history_days: 365}   # see `edgelab backfill`
   earnings_drift:  {enabled: true, min_abs_score: 0.4, horizon: 20}
   spinoff_orphan:  {enabled: true, wait_days: 10, min_drop: 0.05, horizon: 30}
+
+api:
+  cors_origins: []              # other origins allowed to call the API, e.g. a Tauri/Capacitor wrapper's origin
 
 # Data sources. Each one that is enabled runs every day; a failing source is logged and skipped.
 sources:

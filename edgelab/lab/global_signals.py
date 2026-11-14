@@ -1,7 +1,7 @@
 """Lab signals fed by the international sources. All start experimental (lab = True)."""
 import numpy as np
 
-from ..llm.client import ContaminationError
+from ..llm.client import LLMError
 from ..signals.base import Pick, Signal
 
 ACTIVIST_WORDS = ("重要提案", "経営への", "株主提案", "activis", "engage", "strategic")
@@ -44,7 +44,8 @@ class Buyback(Signal):
                 continue
             try:
                 size = ctx.llm.buyback_size(e)["pct_of_shares"]
-            except ContaminationError:
+            except LLMError as e:
+                ctx.skipped(e)
                 continue
             if size < self.p.get("min_pct", 1.0):
                 continue
@@ -87,7 +88,8 @@ class SupplyChainRead(Signal):
                 continue
             try:
                 s = ctx.llm.score_earnings(e)
-            except ContaminationError:
+            except LLMError as e:
+                ctx.skipped(e)
                 continue
             if abs(s["surprise"]) >= self.p.get("min_abs_score", 0.5):
                 self._emit(e.ticker, s["surprise"], f"earnings surprise {s['surprise']:+.2f}", ctx, out, seen)
