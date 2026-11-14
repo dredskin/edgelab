@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "edgelab"
+version = "0.1.0"
+description = "Signal tournament + risk layer for small-cap research, with an installable dashboard"
+requires-python = ">=3.10"
+dependencies = ["numpy", "pandas", "scipy", "pyyaml", "requests", "fastapi", "uvicorn"]
+
+[project.optional-dependencies]
+live = ["yfinance", "anthropic"]
+dev = ["pytest", "httpx"]
+
+[project.scripts]
+edgelab = "edgelab.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["edgelab*"]

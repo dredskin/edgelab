@@ -1,0 +1,4 @@
+# One ticker per line: the small/micro-caps you want EdgeLab to cover.
+# Start with 50-300 names under ~$2B market cap with little analyst coverage.
+# Replace these placeholders with your own list.
+AAPL   # smoke-test placeholder only -- not a small-cap; delete once you add your list
