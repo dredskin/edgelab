@@ -60,7 +60,7 @@ def test_closes_only_its_own_positions_after_horizon(tmp_path):
 # ---------------- Interactive Brokers ----------------
 from types import SimpleNamespace as NS
 
-from edgelab.broker import IBKRBroker, ib_contract_spec, make_broker
+from edgelab.broker import IBKRBroker, ib_contract_spec
 
 
 class FakeIB:

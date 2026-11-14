@@ -8,6 +8,7 @@ unless you set broker.extra_tradable to include them (only if your IB account ac
 
 If IB cannot identify a contract, the order is skipped and logged; nothing is guessed.
 """
+from functools import lru_cache
 
 MARKETS = {
     # suffix: ib primaryExchange, currency, quote divisor (pence -> pounds), board lot, tradable
@@ -41,13 +42,21 @@ MARKETS = {
 }
 
 
+_SUFFIXES = sorted((s for s in MARKETS if s), key=len, reverse=True)
+
+
+@lru_cache(maxsize=None)
 def split(ticker: str):
     """'7203.T' -> ('7203', '.T'). Longest matching suffix wins; no match -> US."""
     t = ticker.upper()
-    for suf in sorted((s for s in MARKETS if s), key=len, reverse=True):
+    for suf in _SUFFIXES:
         if t.endswith(suf):
             return t[: -len(suf)], suf
     return t, ""
+
+
+def suffix(ticker: str) -> str:
+    return split(ticker)[1]
 
 
 def market(ticker: str) -> dict:

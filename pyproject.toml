@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "edgelab"
-version = "0.1.0"
+version = "0.2.0"
 description = "Signal tournament + risk layer for small-cap research, with an installable dashboard"
 requires-python = ">=3.10"
 dependencies = ["numpy", "pandas", "scipy", "pyyaml", "requests", "fastapi", "uvicorn"]
@@ -12,7 +12,7 @@ dependencies = ["numpy", "pandas", "scipy", "pyyaml", "requests", "fastapi", "uv
 [project.optional-dependencies]
 live = ["yfinance", "anthropic", "pypdf"]
 ibkr = ["ib_async"]
-dev = ["pytest", "httpx"]
+dev = ["pytest", "httpx", "ib_async"]
 
 [project.scripts]
 edgelab = "edgelab.cli:main"

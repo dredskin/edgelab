@@ -41,6 +41,9 @@ class BrokerBase:
         self.db.execute("""CREATE TABLE IF NOT EXISTS broker_positions(
             ticker TEXT, qty INTEGER, side TEXT, signal TEXT, opened TEXT, exit_on TEXT,
             order_id TEXT, state TEXT DEFAULT 'open', broker TEXT DEFAULT 'alpaca')""")
+        self.db.execute("CREATE TABLE IF NOT EXISTS broker_runs(date TEXT, broker TEXT, PRIMARY KEY(date, broker))")
+        self.db.execute("""CREATE TABLE IF NOT EXISTS broker_equity(date TEXT, broker TEXT, equity REAL,
+                           PRIMARY KEY(date, broker))""")
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(broker_positions)")}
         if "broker" not in cols:
             self.db.execute("ALTER TABLE broker_positions ADD COLUMN broker TEXT DEFAULT 'alpaca'")
@@ -51,6 +54,32 @@ class BrokerBase:
     def equity(self) -> float: ...
     def positions(self) -> dict: ...                      # {symbol: {"qty": float}}
     def _submit(self, symbol, qty, side) -> dict: ...     # returns {"id": ...}
+
+    # ---- guards against doing the same thing twice, and against trading through a bad month ----
+    def already_ran(self, session) -> bool:
+        d = pd.Timestamp(session).strftime("%Y-%m-%d")
+        return self.db.execute("SELECT 1 FROM broker_runs WHERE date=? AND broker=?", (d, self.name)).fetchone() is not None
+
+    def mark_ran(self, session):
+        self.db.execute("INSERT OR IGNORE INTO broker_runs VALUES(?,?)", (pd.Timestamp(session).strftime("%Y-%m-%d"), self.name))
+        self.db.commit()
+
+    def record_equity(self, session, equity: float):
+        self.db.execute("INSERT OR REPLACE INTO broker_equity VALUES(?,?,?)",
+                        (pd.Timestamp(session).strftime("%Y-%m-%d"), self.name, float(equity)))
+        self.db.commit()
+
+    def month_to_date(self, session) -> float:
+        """Return of the real broker account this month, from the snapshots record_equity() has taken."""
+        d = pd.Timestamp(session)
+        rows = self.db.execute("SELECT date, equity FROM broker_equity WHERE broker=? AND date<=? ORDER BY date",
+                               (self.name, d.strftime("%Y-%m-%d"))).fetchall()
+        if not rows:
+            return 0.0
+        month_start = d.strftime("%Y-%m-01")
+        before = [e for dt, e in rows if dt < month_start]
+        base = before[-1] if before else rows[0][1]
+        return rows[-1][1] / base - 1 if base else 0.0
 
     # ---- shared bookkeeping ----
     def managed(self) -> list:

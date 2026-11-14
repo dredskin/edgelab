@@ -1,7 +1,7 @@
 """A synthetic small-cap market with known, planted edges -- for testing the machinery, not for profit claims.
 
 Planted truths (so we can check the system finds real edges and rejects fake ones):
-  insider_buy     informative clusters / first-time buys drift up ~4% over 20 days (65% of the time)
+  insider_buy     informative clusters / first-time buys drift up ~6% over 20 days (65% of the time)
   earnings        price jumps on the day, then drifts further in the same direction (post-earnings drift);
                   the drift DECAYS and reverses late in the sample -> the tournament should retire it
   spinoff_listed  forced selling for 10 days, then a rebound
@@ -45,7 +45,7 @@ def build_world(n_tickers=300, n_days=750, seed=42, start="2024-01-02"):
             cluster = int(rng.choice([1, 1, 1, 2, 2, 3]))
             first = bool(rng.random() < 0.3)
             if (cluster >= 2 or first) and rng.random() < 0.65:
-                add_drift(t + 1, j, 0.002, 20)
+                add_drift(t + 1, j, 0.003, 20)
             store.add(Event("insider_buy", dates[t], tickers[j], dict(cluster=cluster, first_time=first)))
 
     # quarterly earnings with post-earnings drift that decays then reverses after day 520
@@ -55,7 +55,7 @@ def build_world(n_tickers=300, n_days=750, seed=42, start="2024-01-02"):
             s = rng.uniform(-1, 1)
             R[t, j] += 0.03 * s
             regime = 1.0 if t < 520 else -0.6
-            add_drift(t + 1, j, 0.0015 * s * regime, 20)
+            add_drift(t + 1, j, 0.003 * s * regime, 20)
             store.add(Event("earnings", dates[t], tickers[j], dict(text="(synthetic)", _true_surprise=s)))
 
     # spin-offs: forced selling, then rebound
@@ -82,19 +82,22 @@ def build_world(n_tickers=300, n_days=750, seed=42, start="2024-01-02"):
     base_vol = rng.lognormal(11, 1, N)
     vol_mult = np.where(stress[:, None], 0.55, 1.0) * rng.lognormal(0, 0.3, (T, N))
     volume = pd.DataFrame(base_vol * vol_mult, dates, tickers)
-    return PricePanel(opn, close, volume), store, dict(stress=(dates[430], dates[469]), decay_from=dates[520])
+    at = lambda k: dates[min(k, T - 1)]                      # short test worlds end before these points
+    return PricePanel(opn, close, volume), store, dict(stress=(at(430), at(469)), decay_from=at(520))
 
 
 class Decoy(Signal):
-    """No edge by construction. The tournament should never promote these."""
+    """No edge by construction. The tournament should never promote these.
+    Picks depend only on the date, so a re-run or a fresh process makes the same ones."""
     lab = False
 
     def __init__(self, k, seed):
         super().__init__({})
         self.name = f"decoy_{k}"
-        self.rng = np.random.default_rng(seed)
+        self.seed = seed
 
     def generate(self, ctx):
+        rng = np.random.default_rng([self.seed, pd.Timestamp(ctx.asof).toordinal()])
         cols = ctx.prices.close.columns
-        return [Pick(self.name, cols[self.rng.integers(len(cols))], int(self.rng.choice([-1, 1])), 0.5, 10, "random")
+        return [Pick(self.name, cols[rng.integers(len(cols))], int(rng.choice([-1, 1])), 0.5, 10, "random")
                 for _ in range(2)]

@@ -8,12 +8,12 @@ Rules every source follows:
 """
 import io
 import re
-import sqlite3
 import time
 
 import pandas as pd
 import requests
 
+from .. import store
 from ..data.events import EventStore
 
 
@@ -49,15 +49,24 @@ class Source:
     def __init__(self, cfg: dict, scfg: dict, db_path: str, http=None):
         self.cfg, self.scfg = cfg, scfg or {}
         self.http = http or Http(cfg.get("sec", {}).get("user_agent", "EdgeLab research"))
-        self.db = sqlite3.connect(db_path)
-        self.db.execute("CREATE TABLE IF NOT EXISTS source_seen(source TEXT, key TEXT, PRIMARY KEY(source, key))")
-        self.db.commit()
+        self.db = store.connect(db_path)
 
     def first_time(self, key: str) -> bool:
         """True exactly once per key: lets a source emit only genuinely new items."""
         cur = self.db.execute("INSERT OR IGNORE INTO source_seen VALUES(?,?)", (self.name, key))
         self.db.commit()
         return cur.rowcount == 1
+
+    def seen(self, key: str) -> bool:
+        return self.db.execute("SELECT 1 FROM source_seen WHERE source=? AND key=?", (self.name, key)).fetchone() is not None
+
+    def mark(self, key: str):
+        self.db.execute("INSERT OR IGNORE INTO source_seen VALUES(?,?)", (self.name, key))
+        self.db.commit()
+
+    def extra_tickers(self, date) -> set:
+        """Stocks outside universe.txt whose prices this source needs (e.g. newly listed spin-offs)."""
+        return set()
 
     def fetch(self, date, universe: set, panel=None, llm=None) -> list:
         raise NotImplementedError
@@ -84,19 +93,18 @@ def strip_markup(raw: str, limit=15000) -> str:
 
 def run_sources(sources, date, universe: set, panel, db_path: str, llm=None) -> EventStore:
     """Run every source, log health per source, and return one EventStore."""
-    db = sqlite3.connect(db_path)
-    db.execute("""CREATE TABLE IF NOT EXISTS source_log(date TEXT, source TEXT, events INTEGER, error TEXT,
-                  PRIMARY KEY(date, source))""")
-    store = EventStore()
+    db = store.connect(db_path)
+    events = EventStore()
     d = pd.Timestamp(date).strftime("%Y-%m-%d")
     for s in sources:
         try:
             ev = s.fetch(date, universe, panel, llm)
-            store.extend(ev)
+            events.extend(ev)
             n, err = len(ev), ""
         except Exception as e:
             n, err = 0, f"{type(e).__name__}: {e}"[:300]
         db.execute("INSERT OR REPLACE INTO source_log VALUES(?,?,?,?)", (d, s.name, n, err))
         print(f"  source {s.name:14s} {n:4d} events" + (f"   ! {err}" if err else ""))
     db.commit()
-    return store
+    db.close()
+    return events

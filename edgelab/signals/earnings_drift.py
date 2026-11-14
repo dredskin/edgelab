@@ -1,4 +1,4 @@
-from ..llm.client import ContaminationError
+from ..llm.client import LLMError
 from .base import Pick, Signal
 
 
@@ -13,8 +13,8 @@ class EarningsDrift(Signal):
                 continue
             try:
                 s = ctx.llm.score_earnings(e)
-            except ContaminationError:
-                ctx.notes["contamination_refusals"] = ctx.notes.get("contamination_refusals", 0) + 1
+            except LLMError as e:
+                ctx.skipped(e)
                 continue
             score = s["surprise"] - 0.3 * s["evasion"]          # evasion is a penalty
             if abs(score) < self.p.get("min_abs_score", 0.4):

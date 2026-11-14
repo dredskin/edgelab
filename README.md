@@ -6,6 +6,10 @@ Every idea is a **signal**. Every signal is paper-traded forward in a **tourname
 survive a statistical test that corrects for luck get capital, and a **risk layer** decides how much.
 An experimental **lab** (starting with the AI-herding fade) runs in the same tournament under a stricter bar.
 
+**Status:** the machinery is built and tested; no real edge has been demonstrated. Everything below has been
+exercised on a synthetic market and against stand-ins for the outside services, not yet against the live ones.
+See [Known limitations](#known-limitations).
+
 > This is a research tool, not financial advice. It paper-trades by default and places no real orders.
 > The synthetic demo has planted edges so the machinery can be tested. Its returns say nothing about real markets.
 
@@ -16,7 +20,7 @@ An experimental **lab** (starting with the AI-herding fade) runs in the same tou
  SEC EDGAR (Form 4, 8-K, 10-12B) ─┐
  Prices (yfinance)               ├─► Events ─► Signals ─────────────► Tournament ──► promoted signals
  Headline feeds (RSS)            ┘    │        insider_cluster          paper ledger      │
-                                      │        earnings_drift  ◄─LLM    BH false-discovery │
+                                      │        earnings_drift  ◄─LLM    scheduled reviews  │
                                       │        spinoff_orphan           promote / retire   ▼
                                       │        lab/herding_fade ◄─LLM                  Risk layer
                                       │                                  fragility thermometer
@@ -30,14 +34,15 @@ An experimental **lab** (starting with the AI-herding fade) runs in the same tou
 
 | Piece | File | Panel idea it implements |
 |---|---|---|
-| Signal tournament | `edgelab/tournament/` | Rigor enforcers: forward-only testing, Benjamini–Hochberg FDR, automatic retirement when edges decay |
+| Signal tournament | `edgelab/tournament/` | Rigor enforcers: forward-only testing, scheduled reviews, week-clustered statistics, Benjamini–Hochberg FDR, retirement when edges decay |
 | Insider cluster | `edgelab/signals/insider.py` | Behavior readers: first-time and clustered insider buys |
 | LLM earnings drift | `edgelab/signals/earnings_drift.py` | Edge hunters + LLM trainer: LLM scores surprise and evasion; stats decide |
 | Spin-off orphans | `edgelab/signals/spinoff.py` | Forced sellers |
 | AI-herding fade (lab) | `edgelab/lab/herding_fade.py` | Fade big moves on headlines the LLM judges to be hype |
 | Fragility thermometer | `edgelab/risk/fragility.py` | Physicist + geologist: correlation, volatility, liquidity drain |
 | Sizing & drawdown budget | `edgelab/risk/sizing.py` | Mathematician + strategist + rabbi: quarter-Kelly, reserves, loss caps |
-| LLM client | `edgelab/llm/client.py` | Contamination guard, frozen model and prompts, disk cache |
+| LLM client | `edgelab/llm/client.py` | Contamination guard, frozen model and prompts, disk cache, documents treated as untrusted |
+| Live session | `edgelab/live.py`, `edgelab/runner.py` | One session per run; all state in SQLite, so runs can be repeated and missed days caught up |
 
 ## Quick start (no keys, no internet)
 
@@ -46,16 +51,32 @@ python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\
 pip install -e ".[dev]"
 edgelab demo                 # synthetic small-cap market, ~15 seconds
 edgelab serve --db demo.db   # open http://localhost:8000
-pytest                       # 7 tests, including an end-to-end run
+pytest                       # about 40 seconds, including an end-to-end run
 ```
 
-The demo shows the tournament promoting the planted edges, **rejecting all three random decoy signals**, retiring a
-signal whose edge decays, the LLM contamination guard refusing pre-cutoff documents, and the fragility
-thermometer cutting exposure to about a quarter during the crash window.
+The demo's edges are planted, so the right answers are known. It shows the tournament promoting the two lasting
+edges, promoting the earnings edge while it works and retiring it after it is made to reverse, never promoting
+the three random decoys, the LLM contamination guard refusing pre-cutoff documents, and the fragility
+thermometer cutting the size of new positions to about a quarter during the crash window.
 
-Known demo quirk worth noticing: `earnings_drift` gets retired *before* its planted decay, because a noisy stretch
-pushed its recent t-stat below the threshold. Retirement rules trade off false alarms against slow reactions. Tune
-`retire_window` / `retire_t` in `config.yaml` and watch the effect.
+The decoys are an easy test (they lose to trading costs). The hard test is in `tests/test_tournament.py`: signals
+with exactly zero edge, looked at every week for over a year, must almost never be promoted.
+
+## How a signal earns capital
+
+- **Forward only.** A pick is written down before its outcome exists, bought at the next open, and scored net of
+  costs against its own market's benchmark.
+- **Scheduled reviews, not daily peeking.** A signal is judged when its settled trades reach 40, 80, 160, 320...
+  (80, 160... for lab signals), and each later review has to clear a higher bar. Checking every day and promoting
+  on the first good day is how a no-edge signal gets through: in a simulation with correlated trades, about
+  half of the no-edge signals were promoted under that rule, and about 1 in 70 under this one.
+- **Weeks, not trades, are the evidence.** Trades entered in the same week tend to win or lose together, so the
+  statistics count independent weeks (`min_weeks`, default 8) rather than treating 40 trades as 40 experiments.
+- **Every idea counts against the budget.** The false-discovery limit (`fdr_q`) is applied across every signal
+  ever registered, including the ones that failed.
+- **Failures stay on the record.** A stock that stops trading is closed at the last price seen, not dropped.
+
+Expect this to be slow. A modest real edge can need a few hundred trades before it is promoted.
 
 ## Live paper trading
 
@@ -64,16 +85,24 @@ pip install -e ".[live]"
 export ANTHROPIC_API_KEY=...                 # for the LLM reading layer
 # edit config.yaml: sec.user_agent (SEC requires a real contact), llm.training_cutoff, lab feeds
 # edit universe.txt: your small/micro-cap list
-edgelab daily                                # run once per trading day after the close
+edgelab backfill --days 365                  # once: past insider purchases, so "first purchase" flags mean something
+edgelab daily                                # run once per trading day after the US close
 edgelab report
 edgelab serve
 ```
 
-Each day it pulls Form 4 purchases, 8-K earnings releases (Item 2.02) and spin-off registrations from EDGAR,
-prices from yfinance, and headlines from your feeds. It records every signal's picks in the tournament and
-prints sized paper orders for promoted signals only. On a fresh database nothing is promoted until signals build
-a forward track record (`min_trades`, default 40; lab signals 80). Run it on a schedule (cron / Task Scheduler)
-and be patient. That wait is the point.
+Each run pulls Form 4 purchases, 8-K earnings releases (the attached press release) and spin-off registrations
+from EDGAR, prices from yfinance, and headlines from your feeds. It records every signal's picks in the
+tournament and prints sized paper orders for promoted signals only. On a fresh database nothing is promoted until
+signals build a forward track record. Run it on a schedule (cron / Task Scheduler) and be patient. That wait is
+the point.
+
+- **Safe to repeat.** Everything lives in the database (`edgelab.db`). Running the same day twice changes nothing.
+- **Missed days.** If the computer was off, the next run marks the paper book through the sessions it missed. It
+  does not invent picks for them; `edgelab daily --date YYYY-MM-DD` processes a missed day's filings.
+- **Failures are visible.** A data source that fails is listed in the dashboard and skipped. A document the LLM
+  could not score is counted in the run's output; re-run that date once the problem is fixed.
+- **Back up `edgelab.db`.** It is the forward track record, and it cannot be rebuilt.
 
 **Contamination rule:** the LLM refuses any document dated on or before `llm.training_cutoff`. Never backtest LLM
 signals on older text. Set the cutoff to your model's published training cutoff.
@@ -87,7 +116,9 @@ signals on older text. Set the cutoff to your model's published training cutoff.
 
 Safeguards: non-paper endpoints are refused unless `broker.allow_live: true`; long-only unless
 `broker.allow_shorts: true`; whole-share market orders; EdgeLab only closes positions it opened; set
-`broker.dry_run: true` to print orders without sending. Existing EdgeLab positions count against the gross limit.
+`broker.dry_run: true` to print orders without sending. A session's orders are sent once (a second run that day
+sends nothing unless you pass `--force`), and no new orders go out while the broker account itself is down more
+than `monthly_loss_cap` for the month.
 
 ## Broker: Interactive Brokers paper trading
 
@@ -122,8 +153,12 @@ Put any Yahoo-style ticker in `universe.txt`: `7203.T` (Tokyo), `0700.HK` (Hong 
 - You'll need IB **trading permissions** for each region (Account Settings → Trading Permissions) and market data
   subscriptions for the exchanges you trade.
 - Alpaca trades US listings only; foreign picks are skipped there.
-- The LLM prompts (`prompt_version: v2`) read filings and headlines in their original language and return English
-  scores. `v1` is kept unchanged so earlier results stay reproducible.
+- **Each market has its own benchmark** (`universe.benchmarks`) and can have its own trading cost
+  (`costs_bps_by_market`). A Japanese stock is judged against Japan, never against a US index. The benchmark
+  tickers in `config.yaml` are suggestions: check they load, or the market falls back to the average of its own
+  stocks in your universe.
+- The LLM prompts read filings and headlines in their original language and return English scores. Released
+  prompt versions are frozen (a test pins them); `v3` is current, `v1` and `v2` are kept for reproducibility.
 
 **Live trading is deliberately not switched on.** When signals have a real forward track record, it should be
 an explicit decision with small size and extra limits (daily loss cap, maximum order size).
@@ -165,12 +200,16 @@ Notes:
 The dashboard (`web/`) is an installable Progressive Web App that talks only to the JSON API:
 
 - **Today:** `edgelab serve`, open it in Chrome/Edge/Safari, then "Install app" / "Add to Home Screen".
-  To reach it from your phone, run `edgelab serve --host 0.0.0.0` on your computer or a small cloud server.
+- **From your phone:** `edgelab serve --host 0.0.0.0 --token <a long secret>`, then open
+  `http://<computer>:8000/#token=<the secret>` once on the phone. Without a token EdgeLab refuses to listen beyond
+  the computer it runs on, because the API shows your positions. Over the internet, put it behind HTTPS.
 - **Desktop app:** wrap `web/` with [Tauri](https://tauri.app) (small, native) and point it at the API.
 - **Mobile app stores:** wrap `web/` with [Capacitor](https://capacitorjs.com). In the app, set
-  `localStorage.edgelab_api = "https://your-server"` so it calls your hosted API.
+  `localStorage.edgelab_api = "https://your-server"` and `localStorage.edgelab_token`, and list the wrapper's
+  origin under `api.cors_origins` (other websites cannot read the API by default).
 
-API: `/api/summary`, `/api/daily`, `/api/signals`, `/api/signals/{name}/trades`, `/api/log`, `/api/orders`.
+The API is read-only: `/api/summary`, `/api/daily`, `/api/signals`, `/api/signals/{name}/trades`, `/api/log`,
+`/api/orders`, `/api/sources`.
 
 ## Adding a signal
 
@@ -187,11 +226,36 @@ class MyIdea(Signal):
 Register it in `build_signals()` in `edgelab/cli.py`. The tournament handles the rest. Every idea you try counts
 against the false-discovery budget, which is intended.
 
+## Known limitations
+
+- **Untested against the real services.** SEC, Yahoo, EDINET, TDnet, DART, Alpaca, Interactive Brokers and the
+  Claude API are all exercised through stand-ins. Treat the first live runs as a shakedown.
+- **Free price data.** yfinance is unofficial: prices can be late, wrong or missing, and delisted stocks may
+  vanish. Daily bars only, so every trade enters at the next open.
+- **One run per day, one calendar.** Asian filings are acted on a session later than a local trader could.
+- **The thermometer is a heuristic.** It ranks today against its own history, so it reads "elevated" fairly
+  often even in calm markets; it only shrinks new positions; and with fewer than 5 stocks it cannot measure
+  anything (the run says so). Its thresholds have not been validated on real crashes.
+- **Retirement is trigger-happy.** It looks at the last 30 trades, so a real but modest edge will sooner or later
+  be retired by bad luck, and retirement is permanent.
+- **The statistics are careful, not perfect.** Clustering by week does not fully cover month-long holds that
+  overlap, or two signals that are really the same idea.
+- **Paper is not live.** Market orders in thin stocks will fill worse than the flat 30 bp cost assumed here, and
+  the paper book differs from a broker account (whole shares, skipped shorts, real fills).
+- **The LLM layer can be gamed or wrong.** Documents are fenced off and answers range-checked, which reduces the
+  risk of a press release steering its own score; it does not remove it. `llm.training_cutoff` must match the
+  model you configure.
+- **Simple definitions.** An insider "cluster" means several buyers on the same day; `supply_chain.yaml` ships
+  empty; TDnet comes from a community mirror.
+
 ## Roadmap
 
-1. **Herding fade, intraday:** timestamped news API + minute bars; fade within minutes instead of at the next open.
-2. **Live-trading gate:** per-order and daily loss limits plus a confirmation step before `allow_live` can be used.
-3. **More signals from the matrices:** government contracts, post-cascade rebound, tax-loss rebound,
+1. **Shakedown on live data:** run `edgelab daily` for two weeks on a small universe and fix what the real
+   services return differently from the stand-ins.
+2. **Herding fade, intraday:** timestamped news API + minute bars; fade within minutes instead of at the next open.
+3. **Live-trading gate:** limit orders, per-order and daily loss limits, and a confirmation step before
+   `allow_live` can be used.
+4. **More signals from the matrices:** government contracts, post-cascade rebound, tax-loss rebound,
    attention exhaustion. **More sources:** Canada SEDI insider reports, HKEXnews and UK RNS direct adapters.
-4. **Synthetic-history stress lab:** run every promoted signal through thousands of generated market histories.
-5. **Policy-risk layer:** flag tariff, sanction and regulatory exposure (political scientist's ask).
+5. **Synthetic-history stress lab:** run every promoted signal through thousands of generated market histories.
+6. **Policy-risk layer:** flag tariff, sanction and regulatory exposure (political scientist's ask).

@@ -39,6 +39,8 @@
   .view{display:none} .view.on{display:block}
   .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-top:6px} .legend b{display:inline-block;width:10px;height:3px;margin-right:6px;vertical-align:middle}
   .empty{padding:30px;text-align:center;color:var(--muted)}
+  .bar{height:6px;border-radius:99px;background:var(--line);min-width:70px;overflow:hidden} .bar i{display:block;height:100%;background:var(--blue)}
+  dl{margin:0} dt{font-weight:600;margin-top:10px} dd{margin:2px 0 0;color:var(--muted);font-size:13px}
   @media(min-width:900px){nav{position:static;justify-content:center;border:0;background:none;padding:0 0 4px}
     nav button{flex:0 0 auto;padding:10px 18px} body{padding-bottom:20px}}
 </style>
@@ -57,21 +59,21 @@
       <div class="legend"><span><b style="background:var(--accent)"></b>EdgeLab book</span><span><b style="background:var(--muted)"></b>Market</span><span><b style="background:rgba(240,101,107,.35);height:8px"></b>Stress window</span></div></div>
     <h2>Fragility thermometer</h2>
     <div class="card"><div id="fragNow"></div><svg id="frag" viewBox="0 0 800 120" preserveAspectRatio="none"></svg>
-      <div class="muted">0 = calm, 1 = most fragile on record. Exposure is cut automatically above the calm threshold.</div></div>
+      <div class="muted">0 = calm, 1 = most fragile on record. Above the calm threshold, new positions are scaled back automatically; positions already open run to the end of their holding period.</div></div>
   </section>
 
   <section class="view" id="signals">
     <h2>Signal tournament</h2>
     <div class="card scroll"><table id="sigT"></table></div>
-    <p class="muted">Excess return per trade, net of costs, vs the benchmark. Promotion needs enough trades and a Benjamini–Hochberg q-value under the false-discovery limit. Tap a row for its trades.</p>
+    <p class="muted">Excess return per trade, net of costs, vs each market's benchmark. A signal is judged only at scheduled reviews (when its trade count doubles), must have trades spread over enough different weeks, and must clear a false-discovery limit across every signal ever tried. Tap a row for its trades.</p>
     <div id="trades"></div>
   </section>
 
   <section class="view" id="lab">
-    <h2>AI-herding fade · experimental</h2>
-    <div class="card" id="labCard"></div>
-    <h2>Recent fades</h2>
+    <h2>Experimental signals</h2>
     <div class="card scroll"><table id="labT"></table></div>
+    <p class="muted">Lab signals are paper-traded in the same tournament but face a stricter bar before they can receive capital.</p>
+    <div id="labNotes"></div>
   </section>
 
   <section class="view" id="activity">
@@ -81,12 +83,25 @@
   </section>
 </main>
 <script>
-const API = localStorage.getItem("edgelab_api") || "";   // set to a server URL when running inside a mobile wrapper
+// Settings for wrappers: localStorage.edgelab_api = "https://your-server", localStorage.edgelab_token = "..."
+// A link ending in #token=... stores the token once and removes it from the address bar.
+const API = localStorage.getItem("edgelab_api") || "";
+const hash = new URLSearchParams(location.hash.slice(1));
+if (hash.get("token")) { localStorage.setItem("edgelab_token", hash.get("token")); history.replaceState(null, "", location.pathname); }
+const TOKEN = localStorage.getItem("edgelab_token") || "";
+
 const $ = s => document.querySelector(s);
+// Everything that comes from data (tickers, filer names, error text) is escaped before it touches the page.
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const pct = (x, d=1) => x==null||isNaN(x) ? "–" : (x*100).toFixed(d)+"%";
 const num = (x, d=2) => x==null||isNaN(x) ? "–" : Number(x).toFixed(d);
 const cls = x => x>0 ? "pos" : x<0 ? "neg" : "";
-const get = p => fetch(API + p).then(r => r.json());
+const STATUS = {candidate:"candidate", promoted:"promoted", retired:"retired"};
+const get = p => fetch(API + p, {headers: TOKEN ? {"X-EdgeLab-Token": TOKEN} : {}}).then(r => {
+  if (r.status === 401) throw new Error("token");
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+});
 
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   document.querySelectorAll("nav button,.view").forEach(e => e.classList.remove("on"));
@@ -96,15 +111,17 @@ document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
 function line(svg, series, opts={}){
   const W=800, H=+svg.getAttribute("viewBox").split(" ")[3], pad=6;
   const all = series.flatMap(s => s.y).filter(v => isFinite(v));
+  if (!all.length) { svg.innerHTML = ""; return; }
   const lo = opts.min ?? Math.min(...all), hi = opts.max ?? Math.max(...all);
-  const n = Math.max(...series.map(s => s.y.length));
+  const n = Math.max(2, ...series.map(s => s.y.length));
   const X = i => i/(n-1)*W, Y = v => H-pad-(v-lo)/(hi-lo||1)*(H-2*pad);
-  let out = (opts.bands||[]).map(([a,b]) => `<rect x="${X(a)}" y="0" width="${X(b)-X(a)}" height="${H}" fill="rgba(240,101,107,.14)"/>`).join("");
+  let out = (opts.bands||[]).filter(([a,b]) => a>=0 && b>=0).map(([a,b]) => `<rect x="${X(a)}" y="0" width="${X(b)-X(a)}" height="${H}" fill="rgba(240,101,107,.14)"/>`).join("");
   out += series.map(s => `<polyline fill="none" stroke="${s.c}" stroke-width="${s.w||2}" vector-effect="non-scaling-stroke"
      points="${s.y.map((v,i)=>isFinite(v)?`${X(i).toFixed(1)},${Y(v).toFixed(1)}`:"").join(" ")}"/>`).join("");
   svg.innerHTML = out;
 }
 
+// cols: [header, cell(row)]. Cells return HTML, so every cell function escapes its own data.
 function table(el, cols, rows, onclick){
   if(!rows.length){ el.innerHTML = `<tr><td class="empty">Nothing yet</td></tr>`; return; }
   el.innerHTML = `<tr>${cols.map(c=>`<th>${c[0]}</th>`).join("")}</tr>` +
@@ -112,7 +129,33 @@ function table(el, cols, rows, onclick){
   if(onclick) el.querySelectorAll("tr.click").forEach(tr => tr.onclick = () => onclick(rows[tr.dataset.i]));
 }
 
-const chip = s => `<span class="chip ${s.status}">${s.status}</span>${s.lab?'<span class="chip lab">lab</span>':""}`;
+const chipFor = st => `<span class="chip ${STATUS[st]||"candidate"}">${esc(st)}</span>`;
+const chip = s => chipFor(s.status) + (s.lab ? '<span class="chip lab">lab</span>' : "");
+const muted = v => `<span class="muted">${esc(v)}</span>`;
+const review = s => {                       // progress towards the next scheduled review
+  const next = s.next_review, n = s.n ?? 0;
+  if (!next) return "–";
+  return `<div class="bar" title="${n} of ${next}"><i style="width:${Math.min(100, 100*n/next).toFixed(0)}%"></i></div><span class="muted">${n} / ${next}</span>`;
+};
+
+// Same definitions as edgelab.runner.performance, for live books where no summary was saved.
+function performance(eq){
+  if (eq.length < 3) return {};
+  const r = eq.slice(1).map((v,i) => v/eq[i]-1), n = r.length;
+  const mean = r.reduce((a,b)=>a+b,0)/n, sd = Math.sqrt(r.reduce((a,b)=>a+(b-mean)**2,0)/(n-1));
+  const cagr = (eq[n]/eq[0])**(252/n)-1, vol = sd*Math.sqrt(252);
+  let peak = eq[0], dd = 0; eq.forEach(v => { peak = Math.max(peak, v); dd = Math.max(dd, 1-v/peak); });
+  return {total: eq[n]/eq[0]-1, sharpe: vol ? cagr/vol : 0, max_dd: dd};
+}
+
+const LAB_NOTES = {
+  herding_fade: "Fades sharp moves on headlines the LLM judges to be mostly hype. Next upgrade: intraday bars and timestamped headlines.",
+  earnings_drift_intl: "LLM-scored earnings surprises outside the US, judged on their own record.",
+  insider_intl: "Director and officer purchases outside the US, from announcement feeds.",
+  large_stake: "A holder discloses a new or larger 5%+ stake; stronger when the stated purpose is activist.",
+  buyback: "A company decides to repurchase its own shares; the LLM extracts how large the programme is.",
+  supply_chain: "A supplier's sales accelerate or its earnings surprise: trade its customers.",
+};
 
 async function load(){
   const [sum, daily, sigs, log, orders, sources] = await Promise.all(
@@ -120,14 +163,14 @@ async function load(){
   const m = sum.meta || {}, L = sum.latest || {};
   $("#mode").textContent = m.kind === "demo" ? "synthetic demo" : "live paper";
   $("#asof").textContent = L.date ? "as of " + L.date : "";
-  const p = m.performance || {};
+  const p = m.performance || performance(daily.map(d=>d.equity));
   const sc = sum.status_counts || {};
-  const k = [["Book return", pct(p.total ?? (L.equity-1)), m.benchmark ? "market "+pct(m.benchmark.total) : ""],
+  const k = [["Book return", pct(p.total), m.benchmark ? "market "+pct(m.benchmark.total) : ""],
              ["Sharpe", num(p.sharpe), m.benchmark ? "market "+num(m.benchmark.sharpe) : ""],
              ["Max drawdown", pct(p.max_dd), m.benchmark ? "market "+pct(m.benchmark.max_dd) : ""],
-             ["Exposure now", pct(L.risk_mult,0), "of normal size"],
+             ["New-position size", pct(L.risk_mult,0), "of normal"],
              ["Signals live", sc.promoted||0, `${sc.candidate||0} testing · ${sc.retired||0} retired`]];
-  $("#kpis").innerHTML = k.map(([l,v,s])=>`<div class="card kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`).join("");
+  $("#kpis").innerHTML = k.map(([l,v,s])=>`<div class="card kpi"><div class="l">${l}</div><div class="v">${esc(v)}</div><div class="s">${esc(s)}</div></div>`).join("");
 
   const dates = daily.map(d=>d.date);
   const bands = m.stress ? [[dates.findIndex(d=>d>=m.stress[0]), dates.findIndex(d=>d>=m.stress[1])]] : [];
@@ -135,45 +178,44 @@ async function load(){
   if(m.bench_curve) series.unshift({y: m.bench_curve, c:"var(--muted)", w:1.5});
   line($("#eq"), series, {bands});
   line($("#frag"), [{y: daily.map(d=>d.fragility), c:"var(--warn)"}, {y: daily.map(d=>d.risk_mult), c:"var(--blue)", w:1.5}], {min:0, max:1, bands});
-  const f = L.fragility ?? 0;
-  $("#fragNow").innerHTML = `<div style="display:flex;justify-content:space-between"><b>${f<.6?"Calm":f<.85?"Elevated":"Fragile"} · ${num(f)}</b>
-     <span class="muted"><span style="color:var(--warn)">━</span> fragility &nbsp; <span style="color:var(--blue)">━</span> exposure</span></div>
-     <div class="gauge"><i style="left:calc(${f*100}% - 2px)"></i></div>`;
+  const f = Math.min(1, Math.max(0, Number(L.fragility) || 0)), calm = sum.risk?.fragility?.calm_below ?? .6;
+  $("#fragNow").innerHTML = `<div style="display:flex;justify-content:space-between"><b>${f<calm?"Calm":f<.85?"Elevated":"Fragile"} · ${num(f)}</b>
+     <span class="muted"><span style="color:var(--warn)">━</span> fragility &nbsp; <span style="color:var(--blue)">━</span> new-position size</span></div>
+     <div class="gauge"><i style="left:calc(${(f*100).toFixed(1)}% - 2px)"></i></div>`;
 
-  table($("#sigT"), [["Signal", s=>`${s.name}<br>${chip(s)}`], ["Trades", s=>s.n??0], ["Avg excess", s=>`<span class="${cls(s.mean)}">${pct(s.mean,2)}</span>`],
-     ["Hit rate", s=>pct(s.hit,0)], ["t-stat", s=>num(s.t)], ["q-value", s=>num(s.q,3)], ["Recent t", s=>num(s.recent_t)]], sigs, showTrades);
+  const sigCols = [["Signal", s=>`${esc(s.name)}<br>${chip(s)}`], ["Next review", review], ["Weeks", s=>s.weeks??0],
+     ["Avg excess", s=>`<span class="${cls(s.mean)}">${pct(s.mean,2)}</span>`], ["Hit rate", s=>pct(s.hit,0)],
+     ["t-stat", s=>num(s.t)], ["q-value", s=>num(s.q,3)], ["Recent t", s=>num(s.recent_t)]];
+  table($("#sigT"), sigCols, sigs, showTrades);
 
-  const hf = sigs.find(s=>s.name==="herding_fade");
-  const need = sum.tournament?.lab_min_trades;
-  $("#labCard").innerHTML = hf ? `<div style="display:flex;gap:10px;align-items:center">${chip(hf)}</div>
-    <p>Fades sharp moves on headlines the LLM judges to be mostly hype. Paper-traded in the same tournament, with a stricter bar: <b>${need}</b> settled trades before it can get capital.</p>
-    <div class="grid"><div class="kpi"><div class="l">Trades</div><div class="v">${hf.n??0}</div><div class="s">need ${need}</div></div>
-    <div class="kpi"><div class="l">Avg excess</div><div class="v ${cls(hf.mean)}">${pct(hf.mean,2)}</div></div>
-    <div class="kpi"><div class="l">Hit rate</div><div class="v">${pct(hf.hit,0)}</div></div>
-    <div class="kpi"><div class="l">q-value</div><div class="v">${num(hf.q,3)}</div></div></div>
-    <p class="muted">Next upgrade: intraday bars and timestamped headlines, so the fade happens in minutes instead of at the next open.</p>`
-    : `<div class="empty">Herding fade not enabled.</div>`;
-  if(hf) table($("#labT"), tradeCols, (await get("/api/signals/herding_fade/trades?limit=30")));
+  const labs = sigs.filter(s=>s.lab);
+  table($("#labT"), sigCols, labs, showTrades);
+  $("#labNotes").innerHTML = labs.length ? `<div class="card"><dl>${labs.filter(s=>LAB_NOTES[s.name]).map(s=>`<dt>${esc(s.name)}</dt><dd>${LAB_NOTES[s.name]}</dd>`).join("")}</dl></div>` : "";
 
-  table($("#logT"), [["Date", r=>r.date], ["Signal", r=>r.signal], ["Change", r=>`${r.old} → <span class="chip ${r.new}">${r.new}</span>`], ["Why", r=>`<span class="muted">${r.reason}</span>`]], log);
-  table($("#ordT"), [["Date", r=>r.date], ["Ticker", r=>r.ticker], ["Side", r=>r.weight>0?'<span class="pos">BUY</span>':'<span class="neg">SELL</span>'],
-     ["Size", r=>pct(Math.abs(r.weight),2)], ["Signal", r=>r.signal], ["Why", r=>`<span class="muted">${r.rationale}</span>`]], orders);
-  table($("#srcT"), [["Date", r=>r.date], ["Source", r=>r.source], ["Events", r=>r.events],
-     ["Status", r=>r.error?`<span class="neg">${r.error}</span>`:'<span class="pos">ok</span>']], sources);
+  table($("#logT"), [["Date", r=>esc(r.date)], ["Signal", r=>esc(r.signal)], ["Change", r=>`${esc(r.old)} → ${chipFor(r.new)}`], ["Why", r=>muted(r.reason)]], log);
+  table($("#ordT"), [["Date", r=>esc(r.date)], ["Ticker", r=>esc(r.ticker)], ["Side", r=>r.weight>0?'<span class="pos">BUY</span>':'<span class="neg">SELL</span>'],
+     ["Size", r=>pct(Math.abs(r.weight),2)], ["Signal", r=>esc(r.signal)], ["Why", r=>muted(r.rationale)]], orders);
+  table($("#srcT"), [["Date", r=>esc(r.date)], ["Source", r=>esc(r.source)], ["Events", r=>Number(r.events)||0],
+     ["Status", r=>r.error?`<span class="neg">${esc(r.error)}</span>`:'<span class="pos">ok</span>']], sources);
 }
 
-const tradeCols = [["Ticker", t=>t.ticker], ["Side", t=>t.direction>0?"Long":"Short"], ["Signal date", t=>t.asof],
-  ["Excess", t=>t.excess==null?`<span class="muted">${t.state}</span>`:`<span class="${cls(t.excess)}">${pct(t.excess,2)}</span>`],
-  ["Why", t=>`<span class="muted">${t.rationale||""}</span>`]];
+const tradeCols = [["Ticker", t=>esc(t.ticker)], ["Side", t=>t.direction>0?"Long":"Short"], ["Signal date", t=>esc(t.asof)],
+  ["Excess", t=>t.excess==null?muted(t.state):`<span class="${cls(t.excess)}">${pct(t.excess,2)}</span>`],
+  ["Why", t=>muted(t.rationale||"")]];
 
 async function showTrades(s){
-  const rows = await get(`/api/signals/${s.name}/trades?limit=40`);
-  $("#trades").innerHTML = `<h2>${s.name} · latest trades</h2><div class="card scroll"><table id="trT"></table></div>`;
+  const rows = await get(`/api/signals/${encodeURIComponent(s.name)}/trades?limit=40`);
+  $("#trades").innerHTML = `<h2>${esc(s.name)} · latest trades</h2><div class="card scroll"><table id="trT"></table></div>`;
   table($("#trT"), tradeCols, rows);
+  document.querySelector('nav button[data-v="signals"]').click();
   $("#trades").scrollIntoView({behavior:"smooth"});
 }
 
-load().catch(e => { $("#mode").textContent = "offline"; console.error(e); });
+load().catch(e => {
+  $("#mode").textContent = e.message === "token" ? "token needed" : "offline";
+  if (e.message === "token") $("#kpis").innerHTML = `<div class="card">This dashboard is protected. Open it once with <b>#token=…</b> at the end of the address (the token you started <code>edgelab serve</code> with).</div>`;
+  console.error(e);
+});
 if("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");
 </script>
 </body>

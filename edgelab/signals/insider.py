@@ -14,6 +14,8 @@ class InsiderCluster(Signal):
             if e.ticker not in ctx.prices.close.columns or not self.in_scope(e.ticker):
                 continue
             strength = min(1.0, 0.3 * c + (0.4 if first else 0))
-            why = f"{c} insider(s) bought" + (", first purchase in years" if first else "")
+            months = e.payload.get("history_days", 0) // 30
+            why = f"{c} insider(s) bought" + (
+                f", first purchase in {months}+ months" if first and months else ", first purchase" if first else "")
             picks.append(Pick(self.name, e.ticker, +1, strength, self.p.get("horizon", 20), why))
         return picks
