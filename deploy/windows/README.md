@@ -13,7 +13,7 @@ Clone or download `dredskin/edgelab` to a folder, for example `C:\Projects\edgel
 Create a Gmail **app password** for the sender account (Google Account > Security > App passwords). Then, in
 PowerShell (replace the values, and press Enter on each line):
 
-    [Environment]::SetEnvironmentVariable("EDGELAB_MAIL_TO", "jvbramwell@gmail.com", "User")
+    [Environment]::SetEnvironmentVariable("EDGELAB_MAIL_TO", "<your report address>", "User")
     [Environment]::SetEnvironmentVariable("EDGELAB_MAIL_FROM", "<sender Gmail address>", "User")
     [Environment]::SetEnvironmentVariable("EDGELAB_SMTP_USER", "<sender Gmail address>", "User")
     [Environment]::SetEnvironmentVariable("EDGELAB_SMTP_PASSWORD", "<app password>", "User")
