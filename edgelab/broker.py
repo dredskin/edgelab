@@ -16,6 +16,8 @@ import uuid
 import pandas as pd
 import requests
 
+from . import markets
+
 PAPER_URL = "https://paper-api.alpaca.markets"
 
 
@@ -32,6 +34,9 @@ class BrokerBase:
         self.allow_shorts = b.get("allow_shorts", False)
         self.min_order = b.get("min_order_dollars", 100)
         self.dry_run = b.get("dry_run", False)
+        self.base_ccy = "USD"
+        self.extra_tradable = set(b.get("extra_tradable", []))
+        self.lot_overrides = {k.upper(): int(v) for k, v in (b.get("lot_sizes") or {}).items()}
         self.db = sqlite3.connect(db_path)
         self.db.execute("""CREATE TABLE IF NOT EXISTS broker_positions(
             ticker TEXT, qty INTEGER, side TEXT, signal TEXT, opened TEXT, exit_on TEXT,
@@ -54,10 +59,29 @@ class BrokerBase:
         cols = ["rowid", "ticker", "qty", "side", "signal", "opened", "exit_on"]
         return [dict(zip(cols, r)) for r in cur.fetchall()]
 
-    def managed_gross(self, prices: dict, equity: float) -> float:
+    def supports(self, ticker: str) -> bool:
+        m = markets.market(ticker)
+        return m["tradable"] or m["suffix"] in self.extra_tradable
+
+    def lot(self, ticker: str) -> int:
+        return self.lot_overrides.get(ticker.upper(), markets.market(ticker)["lot"])
+
+    def price_in_base(self, ticker, px_local, fx: dict):
+        """Convert a quoted local price (e.g. pence, yen) to the account's base currency."""
+        m = markets.market(ticker)
+        rate = 1.0 if m["ccy"] == self.base_ccy else (fx or {}).get(m["ccy"])
+        if rate is None or not px_local or not math.isfinite(px_local):
+            return None
+        return px_local / m["divisor"] * rate
+
+    def managed_gross(self, prices: dict, equity: float, fx: dict = None) -> float:
         if equity <= 0:
             return 0.0
-        return sum(p["qty"] * prices.get(p["ticker"], 0) for p in self.managed()) / equity
+        tot = 0.0
+        for p in self.managed():
+            pb = self.price_in_base(p["ticker"], prices.get(p["ticker"]), fx)
+            tot += p["qty"] * (pb or 0)
+        return tot / equity
 
     def close_expired(self, today) -> list:
         """Exit EdgeLab positions whose holding horizon has elapsed (never more shares than actually held)."""
@@ -77,22 +101,33 @@ class BrokerBase:
         self.db.commit()
         return done
 
-    def execute(self, orders, prices: dict, equity: float, today) -> list:
-        """orders: [(Pick, weight)] from the paper book. Converts weights to whole shares."""
+    def execute(self, orders, prices: dict, equity: float, today, fx: dict = None) -> list:
+        """orders: [(Pick, weight)]. prices are LOCAL quotes; fx maps currency -> base-currency rate.
+        Sizes in the account's base currency, rounds down to whole board lots."""
         sent = []
         for pick, w in orders:
-            px = prices.get(pick.ticker)
-            if not px or px <= 0 or not math.isfinite(px):
+            tk = pick.ticker
+            if not self.supports(tk):
+                print(f"  skip {tk}: {markets.market(tk)['name']} is research-only for {self.name}")
+                continue
+            px = self.price_in_base(tk, prices.get(tk), fx)
+            if not px or px <= 0:
+                print(f"  skip {tk}: no price or no {markets.currency(tk)}->{self.base_ccy} rate")
                 continue
             side = "buy" if w > 0 else "sell"
             if side == "sell" and not self.allow_shorts:
-                print(f"  skip short {pick.ticker} (broker.allow_shorts is false)")
+                print(f"  skip short {tk} (broker.allow_shorts is false)")
                 continue
-            dollars = abs(w) * equity
-            qty = int(dollars // px)
-            if dollars < self.min_order or qty < 1:
+            amount = abs(w) * equity
+            lot = self.lot(tk)
+            qty = int(amount // (px * lot)) * lot
+            if amount < self.min_order or qty < 1:
                 continue
-            o = self._submit(pick.ticker, qty, side)
+            try:
+                o = self._submit(tk, qty, side)
+            except Exception as e:                       # one bad contract must not stop the rest
+                print(f"  order failed {tk}: {e}")
+                continue
             exit_on = (pd.Timestamp(today) + pd.offsets.BDay(pick.horizon)).strftime("%Y-%m-%d")
             self.db.execute("""INSERT INTO broker_positions(ticker,qty,side,signal,opened,exit_on,order_id,broker)
                                VALUES(?,?,?,?,?,?,?,?)""",
@@ -117,6 +152,9 @@ class AlpacaBroker(BrokerBase):
         self.s = session or requests.Session()
         self.s.headers.update({"APCA-API-KEY-ID": os.environ.get("APCA_API_KEY_ID", ""),
                                "APCA-API-SECRET-KEY": os.environ.get("APCA_API_SECRET_KEY", "")})
+
+    def supports(self, ticker: str) -> bool:
+        return markets.market(ticker)["suffix"] == ""      # Alpaca trades US listings only
 
     def _req(self, method, path, **kw):
         r = self.s.request(method, f"{self.base}{path}", timeout=20, **kw)
@@ -150,15 +188,11 @@ IB_LIVE_PORTS = {7496, 4001}
 
 
 def ib_contract_spec(ticker: str) -> dict:
-    """Map EdgeLab tickers to IB contracts. Yahoo-style suffixes cover Canadian listings."""
-    t = ticker.upper()
-    if t.endswith(".TO"):
-        return dict(symbol=t[:-3].replace("-", "."), exchange="SMART", currency="CAD", primaryExchange="TSE")
-    if t.endswith(".V"):
-        return dict(symbol=t[:-2].replace("-", "."), exchange="SMART", currency="CAD", primaryExchange="VENTURE")
-    if t.endswith(".CN"):
-        return dict(symbol=t[:-3], exchange="SMART", currency="CAD", primaryExchange="CSE")
-    return dict(symbol=t.replace("-", " "), exchange="SMART", currency="USD")
+    m = markets.market(ticker)
+    spec = dict(symbol=markets.ib_symbol(ticker), exchange="SMART", currency=m["ccy"])
+    if m["exch"]:
+        spec["primaryExchange"] = m["exch"]
+    return spec
 
 
 class IBKRBroker(BrokerBase):
@@ -175,7 +209,7 @@ class IBKRBroker(BrokerBase):
         c = cfg.get("broker", {}).get("ibkr", {})
         self.host, self.port = c.get("host", "127.0.0.1"), int(c.get("port", 7497))
         self.client_id = int(c.get("client_id", 17))
-        self.base_currency = c.get("base_currency", "USD")
+        self.base_ccy = c.get("base_currency", "USD").upper()
         if not self.allow_live and self.port not in IB_PAPER_PORTS:
             raise BrokerSafetyError(f"port {self.port} is not an IB paper port {sorted(IB_PAPER_PORTS)}; "
                                     "set broker.allow_live to override")
@@ -197,7 +231,7 @@ class IBKRBroker(BrokerBase):
     def _summary(self) -> dict:
         out = {}
         for v in self.ib.accountSummary(self.acct):
-            if v.currency in (self.base_currency, "BASE", ""):
+            if v.currency in (self.base_ccy, "BASE", ""):
                 try:
                     out[v.tag] = float(v.value)
                 except ValueError:
@@ -216,10 +250,7 @@ class IBKRBroker(BrokerBase):
         out = {}
         for p in self.ib.positions(self.acct):
             c = p.contract
-            sym = c.symbol.replace(" ", "-")
-            if c.currency == "CAD":
-                sym += {"VENTURE": ".V", "CSE": ".CN"}.get(c.primaryExchange, ".TO")
-            out[sym] = {"qty": float(p.position)}
+            out[markets.from_ib(c.symbol, c.currency, c.primaryExchange)] = {"qty": float(p.position)}
         return out
 
     def _submit(self, symbol, qty, side):

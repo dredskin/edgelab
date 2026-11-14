@@ -44,6 +44,34 @@ Return ONLY a JSON object:
 
 HEADLINE AND SNIPPET:
 {text}""",
+    # v2: multilingual. Documents may be in any language (Japanese, Chinese, Korean, German, ...).
+    "earnings_v2": """You are a skeptical equity analyst reading an earnings release or results filing for a small
+company that few analysts cover. The text may be in ANY language; read it in the original language, do not
+assume an English translation exists, and judge it only on the text below.
+
+Return ONLY a JSON object (English values):
+{{"language": "<ISO 639-1 code of the document>",
+  "surprise": <-1.0 to 1.0, how much better (+) or worse (-) than the company's own prior trajectory and guidance>,
+  "evasion": <0.0 to 1.0, how much the release dodges, omits, or softens key numbers vs. a plain disclosure>,
+  "confidence": <0.0 to 1.0, lower if the language, accounting standard or units are unclear>,
+  "reason": "<one sentence in English>"}}
+
+Do not reward promotional tone. Missing numbers raise evasion. Watch units (e.g. Japanese 百万円, Chinese 万元,
+Korean 억원) and fiscal-year conventions.
+
+TEXT:
+{text}""",
+    "headline_v2": """You are judging whether a news headline contains NEW, material, verifiable information
+about a company's cash flows, or is mostly keyword hype (AI, partnership, breakthrough, etc.).
+The headline may be in ANY language; judge it in the original.
+
+Return ONLY a JSON object (English values):
+{{"language": "<ISO 639-1 code>",
+  "substance": <0.0 = pure hype/no new information, 1.0 = clearly material new facts>,
+  "reason": "<one sentence in English>"}}
+
+HEADLINE AND SNIPPET:
+{text}""",
 }
 
 
@@ -86,7 +114,7 @@ class LLMClient:
         self.guard(event.date)
         out = self._ask("earnings", event.payload["text"])
         return {"surprise": float(out.get("surprise", 0)), "evasion": float(out.get("evasion", 0)),
-                "confidence": float(out.get("confidence", 0))}
+                "confidence": float(out.get("confidence", 0)), "language": out.get("language", "")}
 
     def score_headline(self, event) -> dict:
         self.guard(event.date)

@@ -11,12 +11,28 @@ import requests
 
 from ..data.events import Event
 
-PAT = re.compile(r"\((?:NASDAQ|NYSE|NYSE American|TSX|TSXV|CSE|OTCQB|OTCQX|AMEX)\s*:\s*([A-Z.]{1,6})\)"
-                 r"|\$([A-Z]{1,5})\b")
+# Exchange labels seen in press releases -> Yahoo-style suffix used across EdgeLab
+EXCH_SUFFIX = {"NASDAQ": "", "NYSE": "", "NYSE AMERICAN": "", "AMEX": "", "OTCQB": "", "OTCQX": "",
+               "TSX": ".TO", "TSXV": ".V", "CSE": ".CN", "LSE": ".L", "AIM": ".L", "XETRA": ".DE", "FRA": ".DE",
+               "EPA": ".PA", "AMS": ".AS", "SIX": ".SW", "TYO": ".T", "TSE": ".T", "HKEX": ".HK", "SEHK": ".HK",
+               "SSE": ".SS", "SZSE": ".SZ", "ASX": ".AX", "SGX": ".SI", "TWSE": ".TW", "KRX": ".KS", "KOSDAQ": ".KQ"}
+PAT = re.compile(r"[(（]\s*(" + "|".join(sorted(map(re.escape, EXCH_SUFFIX), key=len, reverse=True)) +
+                 r")\s*[:：]\s*([A-Z0-9.]{1,8})\s*[)）]|\$([A-Z]{1,5})\b")
 
 
 def detect_tickers(text: str) -> set:
-    return {a or b for a, b in PAT.findall(text)}
+    out = set()
+    for exch, sym, dollar in PAT.findall(text):
+        if dollar:
+            out.add(dollar)
+            continue
+        suf = EXCH_SUFFIX[exch]
+        if suf == ".HK":
+            sym = sym.zfill(4)
+        if suf in (".TO", ".V") and sym.endswith(suf.upper()):
+            sym = sym[: -len(suf)]
+        out.add(sym.rstrip(".") + suf)
+    return out
 
 
 def fetch_headlines(feeds, date, universe: set, user_agent="EdgeLab") -> list:

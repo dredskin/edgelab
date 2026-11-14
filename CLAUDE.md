@@ -27,6 +27,9 @@ of a 13-expert design review. They are the point of the project, so follow them 
   shorting, or larger sizes unless the user explicitly asks in that conversation.
 - The broker only closes positions EdgeLab opened (`broker_positions` table, per broker). Keep it that way.
 - Interactive Brokers: keep both paper checks (paper port 7497/4002 AND account id starting `DU`).
+- Foreign orders are sized in the account's base currency via FX; if a rate or price is missing, skip, never guess.
+  Markets marked `tradable=False` in `edgelab/markets.py` stay research-only unless the user adds them to
+  `broker.extra_tradable`.
 
 ## Working conventions
 

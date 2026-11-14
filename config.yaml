@@ -11,7 +11,7 @@ llm:
   provider: anthropic           # needs ANTHROPIC_API_KEY in your environment
   model: claude-haiku-5-5       # locked version: never change mid-test without resetting the tournament
   temperature: 0
-  prompt_version: v1
+  prompt_version: v2           # v2 = multilingual prompts (v1 kept for reproducibility)
   training_cutoff: 2026-06-30   # documents dated on/before this are REFUSED (contamination guard)
   cache_dir: .llm_cache
 
@@ -46,6 +46,8 @@ broker:
     client_id: 17
     account: ""                 # blank = first account on the connection; must start with DU (paper)
     base_currency: USD          # your account's base currency (e.g. CAD)
+  extra_tradable: []            # e.g. [".KS"] ONLY if your IB account really has Korea/Taiwan/India permission
+  lot_sizes: {}                 # per-stock board lots IB requires, e.g. {"0700.HK": 100}
   allow_shorts: false           # long-only by default; shorting small-caps is costly and risky
   min_order_dollars: 100
   dry_run: false                # true = print orders without sending

@@ -103,11 +103,11 @@ def test_ibkr_paper_orders_and_canadian_symbols(tmp_path):
     b = IBKRBroker(ibcfg(), str(tmp_path / "a.db"), ib)
     assert b.account() == {"id": "DU1234567", "equity": 50000.0, "cash": 20000.0, "status": "paper"}
     assert b.positions() == {"ABC": {"qty": 300.0}, "XYZ.V": {"qty": 1000.0}}
-    sent = b.execute([(Pick("insider_cluster", "XYZ.V", 1, 1, 20), 0.05)], {"XYZ.V": 0.50}, b.equity(), "2026-11-16")
-    assert sent == [("XYZ.V", 5000, "buy")]
+    sent = b.execute([(Pick("insider_cluster", "XYZ.V", 1, 1, 20), 0.05)], {"XYZ.V": 0.50}, b.equity(), "2026-11-16", {"CAD": 0.72})
+    assert sent == [("XYZ.V", 6944, "buy")]                 # $2,500 / (C$0.50 x 0.72)
     contract, order = ib.placed[0]
     assert (contract.symbol, contract.currency, contract.primaryExchange) == ("XYZ", "CAD", "VENTURE")
-    assert (order.action, order.totalQuantity, order.account, order.orderRef) == ("BUY", 5000, "DU1234567", "edgelab")
+    assert (order.action, order.totalQuantity, order.account, order.orderRef) == ("BUY", 6944, "DU1234567", "edgelab")
 
 
 def test_brokers_keep_separate_books(tmp_path):
@@ -121,3 +121,39 @@ def test_brokers_keep_separate_books(tmp_path):
 def test_contract_mapping():
     assert ib_contract_spec("SHOP.TO")["currency"] == "CAD"
     assert ib_contract_spec("BRK-B") == dict(symbol="BRK B", exchange="SMART", currency="USD")
+
+
+# ---------------- worldwide ----------------
+from edgelab import markets
+
+
+def test_market_table():
+    assert markets.split("7203.T") == ("7203", ".T")
+    assert markets.split("6488.TWO") == ("6488", ".TWO")          # longest suffix wins over .TW
+    assert markets.ib_symbol("0700.HK") == "700"
+    assert markets.from_ib("700", "HKD", "SEHK") == "0700.HK"
+    assert markets.market("005930.KS")["tradable"] is False
+
+
+def test_ibkr_sizes_foreign_orders_in_base_currency_with_lots(tmp_path):
+    ib = FakeIB()
+    b = IBKRBroker(ibcfg(), str(tmp_path / "w.db"), ib)            # base USD, equity 50,000
+    fx = {"JPY": 1 / 150, "GBP": 1.25}
+    orders = [(Pick("x", "7203.T", 1, 1, 20), 0.05),                # $2,500 / (¥3,000 = $20) = 125 -> 100 (lot)
+              (Pick("x", "VOD.L", 1, 1, 20), 0.05),                 # 80p = £0.80 = $1.00 -> 2,500 shares
+              (Pick("x", "005930.KS", 1, 1, 20), 0.05),             # Korea: research-only, skipped
+              (Pick("x", "SAP.DE", 1, 1, 20), 0.05)]                # no EUR rate -> skipped, not mis-sized
+    sent = b.execute(orders, {"7203.T": 3000, "VOD.L": 80, "005930.KS": 70000, "SAP.DE": 200}, 50000, "2026-11-16", fx)
+    assert sent == [("7203.T", 100, "buy"), ("VOD.L", 2500, "buy")]
+    jp = ib.placed[0][0]
+    assert (jp.symbol, jp.currency, jp.primaryExchange) == ("7203", "JPY", "TSEJ")
+
+
+def test_alpaca_only_trades_us(tmp_path):
+    b = AlpacaBroker(cfg(), str(tmp_path / "u.db"), FakeSession())
+    assert b.supports("ABC") and not b.supports("7203.T")
+
+
+def test_global_headline_detection():
+    from edgelab.lab.headlines import detect_tickers
+    assert detect_tickers("トヨタ（TYO: 7203）が発表; Tencent (HKEX: 700); BP (LSE: BP.)") == {"7203.T", "0700.HK", "BP.L"}

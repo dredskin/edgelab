@@ -104,6 +104,26 @@ Two independent paper checks must both pass or EdgeLab refuses to connect: the p
 suffixes in `universe.txt`: `.TO` (TSX), `.V` (TSXV), `.CN` (CSE). Orders are tagged `edgelab` in TWS.
 Alpaca and IB positions are tracked separately, so EdgeLab never closes one broker's positions through the other.
 
+### Trading worldwide
+
+Put any Yahoo-style ticker in `universe.txt`: `7203.T` (Tokyo), `0700.HK` (Hong Kong), `VOD.L` (London),
+`SAP.DE` (Xetra), `ASML.AS`, `NESN.SW`, `BHP.AX`, `D05.SI`, `600519.SS` (Shanghai via Stock Connect), `SHOP.TO`,
+`XYZ.V`... The full table lives in `edgelab/markets.py`.
+
+- **Sizing is done in your account's base currency.** Local prices are converted with live FX rates (London's
+  pence are converted to pounds first). If a rate is missing, the order is skipped rather than mis-sized.
+- **Board lots** are respected (Tokyo, Shanghai/Shenzhen, Singapore trade in 100s). Hong Kong lots vary by stock:
+  add them under `broker.lot_sizes`.
+- **Research-only markets:** Taiwan, Korea and India are generally not tradable through IB for non-resident
+  accounts. EdgeLab still reads their filings and news (for example, Taiwanese supplier sales predicting a
+  customer's results) but won't send orders there unless you list them in `broker.extra_tradable`, and only do
+  that if your IB account really has the permission.
+- You'll need IB **trading permissions** for each region (Account Settings → Trading Permissions) and market data
+  subscriptions for the exchanges you trade.
+- Alpaca trades US listings only; foreign picks are skipped there.
+- The LLM prompts (`prompt_version: v2`) read filings and headlines in their original language and return English
+  scores. `v1` is kept unchanged so earlier results stay reproducible.
+
 **Live trading is deliberately not switched on.** When signals have a real forward track record, it should be
 an explicit decision with small size and extra limits (daily loss cap, maximum order size).
 

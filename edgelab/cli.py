@@ -118,17 +118,21 @@ def cmd_daily(cfg, args):
     for i in range(max(1, i_today - 120), i_today):
         run.thermo.update(panel.upto(panel.dates[i]))
 
-    broker, prices, equity = None, panel.close.iloc[-1].dropna().to_dict(), None
+    broker, prices, equity, fx = None, panel.close.ffill().iloc[-1].dropna().to_dict(), None, {}
     if args.execute:
         from .broker import make_broker
         broker = make_broker(cfg, db)
         for tk, q, side in broker.close_expired(date):
             print(f"  exit: {side.upper()} {q} {tk} (horizon reached)")
         equity = broker.equity()
-        held = broker.managed_gross(prices, equity)
+        from . import markets
+        from .data.fx import load_fx
+        fx = load_fx({markets.currency(t) for t in prices} | {markets.currency(p["ticker"]) for p in broker.managed()},
+                     broker.base_ccy)
+        held = broker.managed_gross(prices, equity, fx)
         if held:   # count positions already at the broker against today's gross limit
             run.book.positions.append(dict(ticker="_held", w=held, start=i_today + 1, end=i_today + 1, signal="_held"))
-        print(f"{broker.name} account equity {equity:,.0f}; EdgeLab positions use {held:.0%} of it")
+        print(f"{broker.name} account equity {equity:,.0f} {broker.base_ccy}; EdgeLab positions use {held:.0%} of it")
 
     orders = run.day(i_today, panel, events)
     print(f"Fragility {run.thermo.score:.2f} -> exposure x{run.daily[-1]['risk_mult']:.2f}")
@@ -137,7 +141,7 @@ def cmd_daily(cfg, args):
     for p, w in orders:
         print(f"  {'BUY ' if w > 0 else 'SELL'} {p.ticker:6s} {abs(w):.2%} of equity  [{p.signal}] {p.rationale}")
     if broker and orders:
-        for tk, q, side in broker.execute(orders, prices, equity, date):
+        for tk, q, side in broker.execute(orders, prices, equity, date, fx):
             print(f"  sent to {broker.name}: {side.upper()} {q} {tk}")
     elif orders:
         print("(paper orders only; add --execute to send them to your broker's paper account)")
