@@ -6,6 +6,7 @@
   edgelab backfill --days N    collect past insider purchases so "first purchase" flags can be trusted
   edgelab broker               broker paper account and EdgeLab-managed positions
   edgelab report               signal leaderboard and status changes (read-only)
+  edgelab email-report [--dry-run]  e-mail the daily report (mail settings: config.yaml + environment variables)
   edgelab serve                start the dashboard / API (http://localhost:8000)
 """
 import argparse
@@ -202,6 +203,14 @@ def cmd_daily(cfg, args):
               f"{date.date()}` once the problem is fixed to score them.")
 
 
+def cmd_email_report(cfg, args):
+    from . import notify
+    try:
+        print(notify.send_report(cfg, db_path(cfg, args), args.date, args.run_exit, dry_run=args.dry_run))
+    except notify.MailError as e:
+        sys.exit(f"e-mail not sent: {e}")
+
+
 def cmd_backfill(cfg, args):
     from . import markets
     from .data.edgar import EdgarClient
@@ -261,6 +270,11 @@ def main(argv=None):
     p.add_argument("--db")
     for name in ("broker", "report"):
         sub.add_parser(name).add_argument("--db")
+    p = sub.add_parser("email-report", help="e-mail the daily paper report (settings in config.yaml + environment)")
+    p.add_argument("--date")
+    p.add_argument("--db")
+    p.add_argument("--dry-run", action="store_true", help="print the report instead of sending it")
+    p.add_argument("--run-exit", type=int, help="exit code of the daily run, shown in the report")
     p = sub.add_parser("serve")
     p.add_argument("--db")
     p.add_argument("--host", default="127.0.0.1")
@@ -269,7 +283,8 @@ def main(argv=None):
     a = ap.parse_args(argv)
     cfg = load_config(a.config)
     {"demo": cmd_demo, "daily": cmd_daily, "backfill": cmd_backfill, "report": cmd_report, "serve": cmd_serve,
-     "broker": cmd_broker}[a.cmd](cfg, a)
+     "broker": cmd_broker,
+     "email-report": cmd_email_report}[a.cmd](cfg, a)
 
 
 if __name__ == "__main__":
