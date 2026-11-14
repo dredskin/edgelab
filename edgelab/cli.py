@@ -7,6 +7,8 @@
   edgelab broker               broker paper account and EdgeLab-managed positions
   edgelab report               signal leaderboard and status changes (read-only)
   edgelab email-report [--dry-run]  e-mail the daily report (mail settings: config.yaml + environment variables)
+  edgelab snapshot             write site/: read-only JSON and dashboard for Cloudflare Pages (no database copied)
+  edgelab verify-access URL    fail unless Cloudflare Access protects the hosted site
   edgelab serve                start the dashboard / API (http://localhost:8000)
 """
 import argparse
@@ -211,6 +213,21 @@ def cmd_email_report(cfg, args):
         sys.exit(f"e-mail not sent: {e}")
 
 
+def cmd_snapshot(cfg, args):
+    from . import snapshot
+    root = Path(cfg["_root"])
+    files = snapshot.export(cfg, db_path(cfg, args), str(root / "site"), str(root / "web"))
+    print(f"wrote {len(files)} files to site/ (database not included)")
+
+
+def cmd_verify_access(cfg, args):
+    from . import snapshot
+    try:
+        print(snapshot.check_access(args.url))
+    except snapshot.PublicSiteError as e:
+        sys.exit(f"STOP: {e}. Add the Cloudflare Access application for this hostname before publishing.")
+
+
 def cmd_backfill(cfg, args):
     from . import markets
     from .data.edgar import EdgarClient
@@ -275,6 +292,10 @@ def main(argv=None):
     p.add_argument("--db")
     p.add_argument("--dry-run", action="store_true", help="print the report instead of sending it")
     p.add_argument("--run-exit", type=int, help="exit code of the daily run, shown in the report")
+    p = sub.add_parser("snapshot", help="write site/ (read-only JSON + dashboard) for Cloudflare Pages")
+    p.add_argument("--db")
+    p = sub.add_parser("verify-access", help="check that Cloudflare Access protects a hosted URL")
+    p.add_argument("url")
     p = sub.add_parser("serve")
     p.add_argument("--db")
     p.add_argument("--host", default="127.0.0.1")
@@ -284,7 +305,7 @@ def main(argv=None):
     cfg = load_config(a.config)
     {"demo": cmd_demo, "daily": cmd_daily, "backfill": cmd_backfill, "report": cmd_report, "serve": cmd_serve,
      "broker": cmd_broker,
-     "email-report": cmd_email_report}[a.cmd](cfg, a)
+     "email-report": cmd_email_report, "snapshot": cmd_snapshot, "verify-access": cmd_verify_access}[a.cmd](cfg, a)
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0e1116">
 <title>EdgeLab</title>
+<!--EDGELAB_STATIC-->
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg">
 <link rel="apple-touch-icon" href="/icon.svg">
@@ -204,7 +205,9 @@ const tradeCols = [["Ticker", t=>esc(t.ticker)], ["Side", t=>t.direction>0?"Long
   ["Why", t=>muted(t.rationale||"")]];
 
 async function showTrades(s){
-  const rows = await get(`/api/signals/${encodeURIComponent(s.name)}/trades?limit=40`);
+  const STATIC = !!document.querySelector('meta[name="edgelab-static"]');   // hosted snapshot: flat file names
+  const rows = await get(STATIC ? `/api/trades/${encodeURIComponent(s.name)}`
+                                : `/api/signals/${encodeURIComponent(s.name)}/trades?limit=40`);
   $("#trades").innerHTML = `<h2>${esc(s.name)} · latest trades</h2><div class="card scroll"><table id="trT"></table></div>`;
   table($("#trT"), tradeCols, rows);
   document.querySelector('nav button[data-v="signals"]').click();
