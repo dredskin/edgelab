@@ -55,3 +55,69 @@ def test_closes_only_its_own_positions_after_horizon(tmp_path):
     assert b.close_expired("2026-11-20") == []              # horizon not reached
     assert b.close_expired("2026-12-01") == [("ABC", 100, "sell")]   # capped at shares actually held
     assert b.managed() == []
+
+
+# ---------------- Interactive Brokers ----------------
+from types import SimpleNamespace as NS
+
+from edgelab.broker import IBKRBroker, ib_contract_spec, make_broker
+
+
+class FakeIB:
+    def __init__(self, accounts=("DU1234567",)):
+        self.accounts, self.placed, self.connected = list(accounts), [], False
+
+    def isConnected(self): return self.connected
+    def connect(self, host, port, clientId, timeout): self.connected = True
+    def disconnect(self): self.connected = False
+    def managedAccounts(self): return self.accounts
+    def sleep(self, s): pass
+    def qualifyContracts(self, c): return [c]
+
+    def accountSummary(self, acct):
+        return [NS(tag="NetLiquidation", value="50000", currency="USD"),
+                NS(tag="TotalCashValue", value="20000", currency="USD")]
+
+    def positions(self, acct):
+        return [NS(contract=NS(symbol="ABC", currency="USD", primaryExchange=""), position=300),
+                NS(contract=NS(symbol="XYZ", currency="CAD", primaryExchange="VENTURE"), position=1000)]
+
+    def placeOrder(self, contract, order):
+        self.placed.append((contract, order))
+        return NS(order=NS(orderId=len(self.placed)), orderStatus=NS(status="Submitted"))
+
+
+def ibcfg(port=7497, **b):
+    return {"broker": {"provider": "ibkr", "ibkr": {"port": port}, **b}}
+
+
+def test_ibkr_refuses_live_port_and_live_account(tmp_path):
+    with pytest.raises(BrokerSafetyError):
+        IBKRBroker(ibcfg(7496), str(tmp_path / "a.db"), FakeIB())
+    with pytest.raises(BrokerSafetyError):                   # paper port but a LIVE account id
+        IBKRBroker(ibcfg(7497), str(tmp_path / "a.db"), FakeIB(accounts=["U9999999"]))
+
+
+def test_ibkr_paper_orders_and_canadian_symbols(tmp_path):
+    ib = FakeIB()
+    b = IBKRBroker(ibcfg(), str(tmp_path / "a.db"), ib)
+    assert b.account() == {"id": "DU1234567", "equity": 50000.0, "cash": 20000.0, "status": "paper"}
+    assert b.positions() == {"ABC": {"qty": 300.0}, "XYZ.V": {"qty": 1000.0}}
+    sent = b.execute([(Pick("insider_cluster", "XYZ.V", 1, 1, 20), 0.05)], {"XYZ.V": 0.50}, b.equity(), "2026-11-16")
+    assert sent == [("XYZ.V", 5000, "buy")]
+    contract, order = ib.placed[0]
+    assert (contract.symbol, contract.currency, contract.primaryExchange) == ("XYZ", "CAD", "VENTURE")
+    assert (order.action, order.totalQuantity, order.account, order.orderRef) == ("BUY", 5000, "DU1234567", "edgelab")
+
+
+def test_brokers_keep_separate_books(tmp_path):
+    db = str(tmp_path / "s.db")
+    a = AlpacaBroker(cfg(), db, FakeSession())
+    a.execute([(Pick("insider_cluster", "ABC", 1, 1, 20), 0.05)], {"ABC": 10.0}, 100000, "2026-11-02")
+    ib = IBKRBroker(ibcfg(), db, FakeIB())
+    assert ib.managed() == [] and len(a.managed()) == 1
+
+
+def test_contract_mapping():
+    assert ib_contract_spec("SHOP.TO")["currency"] == "CAD"
+    assert ib_contract_spec("BRK-B") == dict(symbol="BRK B", exchange="SMART", currency="USD")

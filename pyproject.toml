@@ -11,6 +11,7 @@ dependencies = ["numpy", "pandas", "scipy", "pyyaml", "requests", "fastapi", "uv
 
 [project.optional-dependencies]
 live = ["yfinance", "anthropic"]
+ibkr = ["ib_async"]
 dev = ["pytest", "httpx"]
 
 [project.scripts]

@@ -88,6 +88,25 @@ Safeguards: non-paper endpoints are refused unless `broker.allow_live: true`; lo
 `broker.allow_shorts: true`; whole-share market orders; EdgeLab only closes positions it opened; set
 `broker.dry_run: true` to print orders without sending. Existing EdgeLab positions count against the gross limit.
 
+## Broker: Interactive Brokers paper trading
+
+EdgeLab connects to **TWS or IB Gateway running on your own computer**, so run these commands there, not in the cloud.
+
+1. `pip install -e ".[ibkr]"`
+2. Log in to TWS or IB Gateway with your **paper trading** username.
+3. In TWS: *File → Global Configuration → API → Settings*: tick **Enable ActiveX and Socket Clients**,
+   keep the port at **7497** (paper), and add `127.0.0.1` to trusted IPs. (IB Gateway paper uses **4002**.)
+4. In `config.yaml` set `broker.provider: ibkr` (and `broker.ibkr.base_currency: CAD` if your account is in CAD).
+5. `edgelab broker` to check the connection, then `edgelab daily --execute`.
+
+Two independent paper checks must both pass or EdgeLab refuses to connect: the port must be a paper port
+(7497 / 4002), and the account id must start with `DU` (IB's paper prefix). Canadian listings use Yahoo-style
+suffixes in `universe.txt`: `.TO` (TSX), `.V` (TSXV), `.CN` (CSE). Orders are tagged `edgelab` in TWS.
+Alpaca and IB positions are tracked separately, so EdgeLab never closes one broker's positions through the other.
+
+**Live trading is deliberately not switched on.** When signals have a real forward track record, it should be
+an explicit decision with small size and extra limits (daily loss cap, maximum order size).
+
 ## The app (desktop and mobile)
 
 The dashboard (`web/`) is an installable Progressive Web App that talks only to the JSON API:
@@ -118,7 +137,7 @@ against the false-discovery budget, which is intended.
 ## Roadmap
 
 1. **Herding fade, intraday:** timestamped news API + minute bars; fade within minutes instead of at the next open.
-2. **Interactive Brokers adapter:** same interface as Alpaca, paper account first (TWS / IB Gateway).
+2. **Live-trading gate:** per-order and daily loss limits plus a confirmation step before `allow_live` can be used.
 3. **More signals from the matrices:** cross-border supply chain, government contracts, post-cascade rebound,
    tax-loss rebound, attention exhaustion.
 4. **Synthetic-history stress lab:** run every promoted signal through thousands of generated market histories.

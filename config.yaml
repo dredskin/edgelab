@@ -37,9 +37,15 @@ risk:
     floor: 0.25                 # never below 25% of normal exposure
 
 broker:
-  provider: alpaca
-  base_url: https://paper-api.alpaca.markets   # PAPER. Non-paper URLs are refused unless allow_live: true
-  allow_live: false
+  provider: alpaca              # alpaca | ibkr
+  base_url: https://paper-api.alpaca.markets   # Alpaca PAPER. Non-paper URLs are refused unless allow_live: true
+  allow_live: false             # applies to every broker; keep false
+  ibkr:                         # Interactive Brokers via TWS / IB Gateway on your machine
+    host: 127.0.0.1
+    port: 7497                  # 7497 TWS paper, 4002 Gateway paper. Live ports are refused unless allow_live
+    client_id: 17
+    account: ""                 # blank = first account on the connection; must start with DU (paper)
+    base_currency: USD          # your account's base currency (e.g. CAD)
   allow_shorts: false           # long-only by default; shorting small-caps is costly and risky
   min_order_dollars: 100
   dry_run: false                # true = print orders without sending

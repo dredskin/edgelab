@@ -2,8 +2,8 @@
 
   edgelab demo                 run the full system on a synthetic market (no keys, no internet)
   edgelab daily [--date D]     live paper-trading day: pull SEC filings + prices, record picks, print orders
-  edgelab daily --execute      ...and send them to your Alpaca PAPER account (exits expired positions first)
-  edgelab broker               Alpaca paper account and EdgeLab-managed positions
+  edgelab daily --execute      ...and send them to your broker's PAPER account (Alpaca or Interactive Brokers) (exits expired positions first)
+  edgelab broker               broker paper account and EdgeLab-managed positions
   edgelab report               signal leaderboard and status changes
   edgelab serve                start the dashboard / API (http://localhost:8000)
 """
@@ -120,15 +120,15 @@ def cmd_daily(cfg, args):
 
     broker, prices, equity = None, panel.close.iloc[-1].dropna().to_dict(), None
     if args.execute:
-        from .broker import AlpacaBroker
-        broker = AlpacaBroker(cfg, db)
+        from .broker import make_broker
+        broker = make_broker(cfg, db)
         for tk, q, side in broker.close_expired(date):
             print(f"  exit: {side.upper()} {q} {tk} (horizon reached)")
         equity = broker.equity()
         held = broker.managed_gross(prices, equity)
         if held:   # count positions already at the broker against today's gross limit
             run.book.positions.append(dict(ticker="_held", w=held, start=i_today + 1, end=i_today + 1, signal="_held"))
-        print(f"Alpaca paper equity ${equity:,.0f}; EdgeLab positions use {held:.0%} of it")
+        print(f"{broker.name} account equity {equity:,.0f}; EdgeLab positions use {held:.0%} of it")
 
     orders = run.day(i_today, panel, events)
     print(f"Fragility {run.thermo.score:.2f} -> exposure x{run.daily[-1]['risk_mult']:.2f}")
@@ -138,19 +138,22 @@ def cmd_daily(cfg, args):
         print(f"  {'BUY ' if w > 0 else 'SELL'} {p.ticker:6s} {abs(w):.2%} of equity  [{p.signal}] {p.rationale}")
     if broker and orders:
         for tk, q, side in broker.execute(orders, prices, equity, date):
-            print(f"  sent to Alpaca paper: {side.upper()} {q} {tk}")
+            print(f"  sent to {broker.name}: {side.upper()} {q} {tk}")
     elif orders:
-        print("(paper orders only; add --execute to send them to your Alpaca paper account)")
+        print("(paper orders only; add --execute to send them to your broker's paper account)")
+    if broker and hasattr(broker, "close"):
+        broker.close()
 
 
 def cmd_broker(cfg, args):
-    from .broker import AlpacaBroker
-    b = AlpacaBroker(cfg, args.db or str(Path(cfg["_root"]) / cfg["storage"]))
+    from .broker import make_broker
+    b = make_broker(cfg, args.db or str(Path(cfg["_root"]) / cfg["storage"]))
     a = b.account()
-    print(f"Alpaca paper account {a.get('account_number', '')}: equity ${float(a['equity']):,.2f}, "
-          f"cash ${float(a['cash']):,.2f}, status {a.get('status')}")
+    print(f"{b.name} account {a['id']}: equity {a['equity']:,.2f}, cash {a['cash']:,.2f}, status {a['status']}")
     for p in b.managed():
         print(f"  {p['side'].upper():4s} {p['qty']:>6} {p['ticker']:6s} [{p['signal']}] opened {p['opened']}, exits {p['exit_on']}")
+    if hasattr(b, "close"):
+        b.close()
 
 
 def cmd_serve(cfg, args):
@@ -165,7 +168,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("demo"); d.add_argument("--db"); d.add_argument("--seed", type=int, default=42)
     y = sub.add_parser("daily"); y.add_argument("--date"); y.add_argument("--db")
-    y.add_argument("--execute", action="store_true", help="send orders to the Alpaca PAPER account")
+    y.add_argument("--execute", action="store_true", help="send orders to the configured broker's PAPER account")
     b = sub.add_parser("broker"); b.add_argument("--db")
     r = sub.add_parser("report"); r.add_argument("--db")
     s = sub.add_parser("serve"); s.add_argument("--db"); s.add_argument("--host", default="127.0.0.1")

@@ -25,7 +25,8 @@ of a 13-expert design review. They are the point of the project, so follow them 
   halving in the sizing path. Loosening any of them needs an explicit request from the user.
 - The broker adapter is **paper-only by default** (`broker.allow_live: false`). Never enable live trading,
   shorting, or larger sizes unless the user explicitly asks in that conversation.
-- The broker only closes positions EdgeLab opened (`broker_positions` table). Keep it that way.
+- The broker only closes positions EdgeLab opened (`broker_positions` table, per broker). Keep it that way.
+- Interactive Brokers: keep both paper checks (paper port 7497/4002 AND account id starting `DU`).
 
 ## Working conventions
 
@@ -38,5 +39,5 @@ of a 13-expert design review. They are the point of the project, so follow them 
 ## Layout
 
 `edgelab/signals/` core signals · `edgelab/lab/` experimental signals · `edgelab/tournament/` ledger and stats ·
-`edgelab/risk/` fragility and sizing · `edgelab/broker.py` Alpaca paper · `edgelab/api.py` + `web/` dashboard ·
+`edgelab/risk/` fragility and sizing · `edgelab/broker.py` Alpaca + Interactive Brokers (paper) · `edgelab/api.py` + `web/` dashboard ·
 `edgelab/cli.py` commands
