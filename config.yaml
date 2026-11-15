@@ -27,7 +27,7 @@ llm:
   cache_dir: .llm_cache
 
 sec:
-  user_agent: "EdgeLab research contact@example.com"   # SEC requires a real contact; edit this
+  user_agent: "JV Bramwell jvbramwell@gmail.com"   # SEC asks automated tools for a name and contact e-mail
 
 tournament:
   min_trades: 40                # settled paper trades before a signal gets its first review (then at 80, 160, ...)
