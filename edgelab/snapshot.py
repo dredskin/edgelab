@@ -89,9 +89,10 @@ def check_access(url: str, opener=None) -> str:
             status, location = e.code, e.headers.get("Location", "") if e.headers else ""
         except Exception as e:
             raise PublicSiteError(f"{target} could not be reached ({type(e).__name__}); not verified") from None
-        if status in (401, 403):
-            continue
         if 300 <= status < 400 and any(m in location for m in ACCESS_MARKERS):
-            continue
+            continue                                  # the only proof: a redirect to the Access login
+        if status in (401, 403):                      # Cloudflare also sends 403 to scripts for bot reasons
+            raise PublicSiteError(f"{target} answered {status} but not with an Access login redirect; "
+                                  "not verified, check it in a private browser window")
         raise PublicSiteError(f"{target} answered {status} without Cloudflare Access: the site is PUBLIC")
     return "protected"

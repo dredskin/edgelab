@@ -99,3 +99,10 @@ def test_unreachable_site_is_not_treated_as_verified():
     with pytest.raises(snapshot.PublicSiteError) as e:
         snapshot.check_access("https://edgelab.example.pages.dev", opener=op)
     assert "not verified" in str(e.value)
+
+
+def test_a_plain_403_is_not_proof_of_access():
+    op = FakeOpener({"": ("status", (403, "")), "api/summary": ("status", (403, ""))})
+    with pytest.raises(snapshot.PublicSiteError) as e:
+        snapshot.check_access("https://edgelab.example.pages.dev", opener=op)
+    assert "not verified" in str(e.value)
