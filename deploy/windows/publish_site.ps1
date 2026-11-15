@@ -1,5 +1,6 @@
-# Publishes the read-only dashboard snapshot to Cloudflare Pages, then checks Cloudflare Access on every address
-# Wrangler prints (the main address AND each preview address).
+# Publishes the read-only dashboard snapshot to a NON-production Cloudflare Pages branch (default "preview"),
+# then checks Cloudflare Access on every address Wrangler reports. The bare project address stays empty, so
+# nothing is ever served there. Access covers *.<project>.pages.dev, which includes the branch address.
 #   powershell -ExecutionPolicy Bypass -File deploy\windows\publish_site.ps1               # the real snapshot
 #   powershell -ExecutionPolicy Bypass -File deploy\windows\publish_site.ps1 -Placeholder  # blank test page, no data
 # Runs only when you call it (or the scheduled task was registered with -Publish). Never runs on a Git push.
@@ -18,6 +19,8 @@ foreach ($name in "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "EDGELAB_PAGE
     }
 }
 $project = if ($env:EDGELAB_PAGES_PROJECT) { $env:EDGELAB_PAGES_PROJECT } else { "edgelab-dashboard" }
+$branch = if ($env:EDGELAB_PAGES_BRANCH) { $env:EDGELAB_PAGES_BRANCH } else { "preview" }
+if ($branch -eq "main") { throw "Refusing to publish to the production branch 'main': the bare project address cannot be put behind Access. Use a branch such as 'preview'." }
 $url = $env:EDGELAB_PAGES_URL
 if (-not $url) {
     Write-Output "EDGELAB_PAGES_URL is not set in THIS window. Open a new PowerShell window and run the script again. Nothing was uploaded."
@@ -37,10 +40,10 @@ if ($Placeholder) {
     $folder = "site"
 }
 
-# 2. Upload (outbound only). The production branch is "main". Keep Wrangler's output to find the preview address.
+# 2. Upload (outbound only) to the non-production branch. Keep Wrangler's output to find the preview address.
 $deployLog = Join-Path $repo "logs\wrangler-deploy.log"
 New-Item -ItemType Directory -Force -Path (Split-Path $deployLog) | Out-Null
-npx --yes wrangler@4 pages deploy $folder --project-name=$project --branch=main --commit-dirty=true 2>&1 | Tee-Object -FilePath $deployLog
+npx --yes wrangler@4 pages deploy $folder --project-name=$project --branch=$branch --commit-dirty=true 2>&1 | Tee-Object -FilePath $deployLog
 if ($LASTEXITCODE -ne 0) { throw "Wrangler upload failed" }
 
 # 3. Every address Wrangler reports must sit behind Cloudflare Access. Check the main address and each preview address.

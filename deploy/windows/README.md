@@ -41,7 +41,9 @@ Logs for each day are in `logs\daily-YYYY-MM-DD.log`. Nothing in this folder is 
 Your computer sends a read-only snapshot out to Cloudflare. Nothing listens for connections on your PC, and the
 database is never uploaded. The hosted address is fixed (`https://<project>.pages.dev`), so no domain is needed.
 
-**Order matters:** create the Access login first, so the site is never open to the internet.
+**Order matters:** create the Access login first, so the site is never open to the internet. The Access
+application needs one destination `*` on `edgelab-dashboard.pages.dev`; remove any destination on the bare
+hostname, since Cloudflare rejects it here.
 
 1. **Create the Pages project** (no content yet). In PowerShell, from the repo folder, with `CLOUDFLARE_API_TOKEN`
    and `CLOUDFLARE_ACCOUNT_ID` set as User variables:
@@ -52,13 +54,14 @@ database is never uploaded. The hosted address is fixed (`https://<project>.page
    Self-hosted. Application domain: `edgelab-dashboard.pages.dev`. Add an **Allow** policy that lists only your own
    login email. Use one-time PIN login (or another identity provider you already use). Save.
 
-3. **Set the hosted address** as a User variable: `EDGELAB_PAGES_URL = https://edgelab-dashboard.pages.dev`
+3. **Set the hosted address** as a User variable: `EDGELAB_PAGES_URL = https://preview.edgelab-dashboard.pages.dev`. The site is published to the `preview` branch, which Access covers through the `*` destination. The bare `edgelab-dashboard.pages.dev` address stays empty; Cloudflare won't accept it as an Access destination in this account.
 
 4. **Publish once by hand** and read the last line. It must say the site is protected:
 
        powershell -ExecutionPolicy Bypass -File deploy\windows\publish_site.ps1
 
    If it says the site is reachable without a login, delete the deployment in the Pages dashboard and fix step 2.
+   Check the branch address (`preview.edgelab-dashboard.pages.dev`) in a private window as well.
    The script refuses to call a public site safe.
 
 5. **Schedule it:** `register_task.ps1 -Time 18:30 -Publish`. Publishing happens only after a clean daily session.
