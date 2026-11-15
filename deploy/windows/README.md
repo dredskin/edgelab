@@ -35,3 +35,39 @@ Add `-Execute` to both scripts only when you want orders sent to the broker's **
 settings and the paper-only checks are in `config.yaml`.
 
 Logs for each day are in `logs\daily-YYYY-MM-DD.log`. Nothing in this folder is committed (see `.gitignore`).
+
+## 6. Hosted copy on Cloudflare Pages behind Cloudflare Access (optional)
+
+Your computer sends a read-only snapshot out to Cloudflare. Nothing listens for connections on your PC, and the
+database is never uploaded. The hosted address is fixed (`https://<project>.pages.dev`), so no domain is needed.
+
+**Order matters:** create the Access login first, so the site is never open to the internet. The Access
+application needs one destination `*` on `edgelab-dashboard.pages.dev`; remove any destination on the bare
+hostname, since Cloudflare rejects it here.
+
+1. **Create the Pages project** (no content yet). In PowerShell, from the repo folder, with `CLOUDFLARE_API_TOKEN`
+   and `CLOUDFLARE_ACCOUNT_ID` set as User variables:
+
+       npx --yes wrangler@4 pages project create edgelab-dashboard --production-branch main
+
+2. **Put Access in front of it.** Cloudflare dashboard > Zero Trust > Access > Applications > Add an application >
+   Self-hosted. Application domain: `edgelab-dashboard.pages.dev`. Add an **Allow** policy that lists only your own
+   login email. Use one-time PIN login (or another identity provider you already use). Save.
+
+3. **Where things go.** The real dashboard is published to `https://preview.edgelab-dashboard.pages.dev`, which Access covers through its `*` destination. The bare `https://edgelab-dashboard.pages.dev` cannot be put behind Access here, so every publish first puts an empty placeholder page there. (`EDGELAB_PAGES_URL` is no longer used.)
+
+4. **Publish once by hand** and read the last line. It must say the site is protected:
+
+       powershell -ExecutionPolicy Bypass -File deploy\windows\publish_site.ps1
+
+   If it says the site is reachable without a login, delete the deployment in the Pages dashboard and fix step 2.
+   Check the branch address (`preview.edgelab-dashboard.pages.dev`) in a private window as well.
+   The script refuses to call a public site safe.
+
+5. **Schedule it:** `register_task.ps1 -Time 18:30 -Publish`. Publishing happens only after a clean daily session.
+
+What the hosted copy shows: the same summary, signals, trades, orders, log and data-source health as the local
+dashboard, as of the last publish. It is paper trading data only. Anyone who could read it could see your paper
+positions, so keep the Access policy limited to you.
+
+Revoking access later: remove the Allow policy in Access, or delete the Pages project.

@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 dependencies = ["numpy", "pandas", "scipy", "pyyaml", "requests", "fastapi", "uvicorn"]
 
 [project.optional-dependencies]
-live = ["yfinance", "anthropic", "pypdf"]
+live = ["yfinance", "anthropic", "pypdf", "httpx"]
 ibkr = ["ib_async"]
 dev = ["pytest", "httpx", "ib_async"]
 
