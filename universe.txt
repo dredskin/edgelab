@@ -1,4 +1,62 @@
-# One ticker per line: the small/micro-caps you want EdgeLab to cover.
-# Start with 50-300 names under ~$2B market cap with little analyst coverage.
-# Replace these placeholders with your own list.
-AAPL   # smoke-test placeholder only -- not a small-cap; delete once you add your list
+# EdgeLab research universe: 40 US small caps, one ticker per line ("#" starts a comment).
+#
+# How this list was chosen (so it is not hand-picked toward recent winners):
+#   * Source: S&P SmallCap 600 members as listed on Wikipedia's "List of S&P 600 companies", read 2026-11-15
+#     (598 tickers after dropping duplicate share classes).
+#   * A random draw stratified by GICS sector, 40 names in proportion to each sector's share of the index
+#     (at least one per sector), Python random.Random(20261115).
+#   * Not checked against live prices yet: any ticker that no longer trades is dropped automatically when
+#     prices are loaded. Replace or extend freely; a new list does not change any signal's past record.
+# Known bias: these are today's index members, so a backfill over past years starts with names that survived.
+#
+# Communication Services
+MSGS
+# Consumer Discretionary
+ADT
+DFH
+LZB
+PRSU
+UPBD
+WGO
+# Consumer Staples
+ENR
+# Energy
+PTEN
+REX
+# Financials
+AMSF
+BBT
+CPF
+KMPR
+PRK
+STC
+TRUP
+WRLD
+# Health Care
+ANIP
+COLL
+CRVL
+HSTM
+TGTX
+# Industrials
+CWST
+DNOW
+KAI
+PBI
+PRIM
+ROCK
+# Information Technology
+ALRM
+DIOD
+PLUS
+SMTC
+# Materials
+KOP
+NGVT
+# Real Estate
+AAT
+JOE
+RHP
+# Utilities
+CWT
+HE
