@@ -21,6 +21,8 @@ WEB_FILES = ["index.html", "sw.js", "manifest.webmanifest", "icon.svg"]
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
 STATIC_ENDPOINTS = ["/api/summary", "/api/daily", "/api/signals", "/api/log", "/api/orders", "/api/sources"]
 ACCESS_MARKERS = ("cloudflareaccess.com", "/cdn-cgi/access")
+# Access answers browsers with a redirect to its login page; plain scripts may just get 403.
+BROWSER_HEADERS = {"Accept": "text/html,application/xhtml+xml", "User-Agent": "Mozilla/5.0 (EdgeLab access check)"}
 
 
 class PublicSiteError(Exception):
@@ -83,7 +85,7 @@ def check_access(url: str, opener=None) -> str:
     for path in ("/", "/api/summary"):
         target = url.rstrip("/") + path
         try:
-            resp = opener.open(urllib.request.Request(target, method="GET"), timeout=20)
+            resp = opener.open(urllib.request.Request(target, method="GET", headers=BROWSER_HEADERS), timeout=20)
             status, location = resp.status, resp.headers.get("Location", "")
         except urllib.error.HTTPError as e:
             status, location = e.code, e.headers.get("Location", "") if e.headers else ""
