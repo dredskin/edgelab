@@ -228,6 +228,14 @@ def cmd_verify_access(cfg, args):
         sys.exit(f"STOP: {e}. Add the Cloudflare Access application for this hostname before publishing.")
 
 
+def cmd_verify_empty(cfg, args):
+    from . import snapshot
+    try:
+        print(snapshot.check_empty(args.url))
+    except snapshot.PublicSiteError as e:
+        sys.exit(f"STOP: {e}.")
+
+
 def cmd_backfill(cfg, args):
     from . import markets
     from .data.edgar import EdgarClient
@@ -296,6 +304,8 @@ def main(argv=None):
     p.add_argument("--db")
     p = sub.add_parser("verify-access", help="check that Cloudflare Access protects a hosted URL")
     p.add_argument("url")
+    p = sub.add_parser("verify-empty", help="check that a public address serves no snapshot data")
+    p.add_argument("url")
     p = sub.add_parser("serve")
     p.add_argument("--db")
     p.add_argument("--host", default="127.0.0.1")
@@ -305,7 +315,8 @@ def main(argv=None):
     cfg = load_config(a.config)
     {"demo": cmd_demo, "daily": cmd_daily, "backfill": cmd_backfill, "report": cmd_report, "serve": cmd_serve,
      "broker": cmd_broker,
-     "email-report": cmd_email_report, "snapshot": cmd_snapshot, "verify-access": cmd_verify_access}[a.cmd](cfg, a)
+     "email-report": cmd_email_report, "snapshot": cmd_snapshot, "verify-access": cmd_verify_access,
+     "verify-empty": cmd_verify_empty}[a.cmd](cfg, a)
 
 
 if __name__ == "__main__":

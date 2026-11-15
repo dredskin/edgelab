@@ -98,3 +98,20 @@ def check_access(url: str, opener=None) -> str:
                                   "not verified, check it in a private browser window")
         raise PublicSiteError(f"{target} answered {status} without Cloudflare Access: the site is PUBLIC")
     return "protected"
+
+
+def check_empty(url: str, opener=None) -> str:
+    """The bare project address cannot be put behind Access, so it must serve only the placeholder.
+    Raise PublicSiteError if any snapshot data (an `exported_at` stamp) is served there."""
+    opener = opener or urllib.request.build_opener(_NoRedirect)
+    target = url.rstrip("/") + "/api/summary"
+    try:
+        resp = opener.open(urllib.request.Request(target, method="GET", headers=BROWSER_HEADERS), timeout=20)
+        body = resp.read(65536).decode("utf-8", "replace")
+    except urllib.error.HTTPError:
+        return "empty"                                # an error page holds no data
+    except Exception as e:
+        raise PublicSiteError(f"{target} could not be reached ({type(e).__name__}); not verified") from None
+    if "exported_at" in body:
+        raise PublicSiteError(f"{target} serves snapshot data: the bare address is PUBLIC")
+    return "empty"

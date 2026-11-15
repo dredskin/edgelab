@@ -106,3 +106,23 @@ def test_a_plain_403_is_not_proof_of_access():
     with pytest.raises(snapshot.PublicSiteError) as e:
         snapshot.check_access("https://edgelab.example.pages.dev", opener=op)
     assert "not verified" in str(e.value)
+
+
+class BodyOpener:
+    def __init__(self, body=None, status=200):
+        self.body, self.status = body, status
+
+    def open(self, req, timeout=None):
+        if self.status >= 400:
+            raise urllib.error.HTTPError(req.full_url, self.status, "x", {}, io.BytesIO())
+        return io.BytesIO(self.body.encode())
+
+
+def test_bare_address_with_snapshot_data_is_public():
+    with pytest.raises(snapshot.PublicSiteError):
+        snapshot.check_empty("https://p.pages.dev", opener=BodyOpener('{"exported_at": "x", "data": {}}'))
+
+
+def test_bare_address_with_placeholder_or_error_is_empty():
+    assert snapshot.check_empty("https://p.pages.dev", opener=BodyOpener("<p>EdgeLab placeholder: no data.</p>")) == "empty"
+    assert snapshot.check_empty("https://p.pages.dev", opener=BodyOpener(status=404)) == "empty"

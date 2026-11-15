@@ -54,7 +54,7 @@ hostname, since Cloudflare rejects it here.
    Self-hosted. Application domain: `edgelab-dashboard.pages.dev`. Add an **Allow** policy that lists only your own
    login email. Use one-time PIN login (or another identity provider you already use). Save.
 
-3. **Set the hosted address** as a User variable: `EDGELAB_PAGES_URL = https://preview.edgelab-dashboard.pages.dev`. The site is published to the `preview` branch, which Access covers through the `*` destination. The bare `edgelab-dashboard.pages.dev` address stays empty; Cloudflare won't accept it as an Access destination in this account.
+3. **Where things go.** The real dashboard is published to `https://preview.edgelab-dashboard.pages.dev`, which Access covers through its `*` destination. The bare `https://edgelab-dashboard.pages.dev` cannot be put behind Access here, so every publish first puts an empty placeholder page there. (`EDGELAB_PAGES_URL` is no longer used.)
 
 4. **Publish once by hand** and read the last line. It must say the site is protected:
 
