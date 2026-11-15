@@ -64,7 +64,7 @@ def test_bad_address_is_refused():
 
 def test_report_is_plain_text_read_only_and_strips_control_characters(db):
     subject, body = notify.build_report(db, "2027-01-04", run_exit=None)
-    assert "1,012.50" in body and "PAPER TRADING ONLY" in body
+    assert "1012.5000" in body and "PAPER TRADING ONLY" in body
     assert "edinet: 0 events, ERROR:" in body
     assert "\x07" not in body
     assert "\x07" not in subject
@@ -115,3 +115,15 @@ def test_no_private_addresses_in_the_committed_config():
     import pathlib
     text = (pathlib.Path(__file__).resolve().parents[1] / "config.yaml").read_text()
     assert "@" not in text.split("mail:")[1]
+
+
+def test_sources_logged_on_a_later_run_date_are_shown(tmp_path):
+    path = str(tmp_path / "w.db")
+    con = store.connect(path)
+    con.execute("INSERT INTO daily VALUES('2026-11-13', 1.002, 0.1, 1.0, 0.0, 0, 0)")
+    con.execute("INSERT INTO source_log VALUES('2026-11-15', 'edgar', 3, NULL)")   # weekend run for Friday
+    con.commit()
+    con.close()
+    _, body = notify.build_report(path)
+    assert "edgar: 3 events, ok" in body and "run of 2026-11-15" in body
+    assert "+0.20% since the first session" in body

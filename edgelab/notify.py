@@ -63,7 +63,11 @@ def build_report(db_path: str, date: str = None, run_exit: int = None) -> tuple:
         if row is None:
             row = con.execute("SELECT * FROM daily ORDER BY date DESC LIMIT 1").fetchone()
         day = row["date"] if row else (date or "unknown")
-        sources = con.execute("SELECT source, events, error FROM source_log WHERE date=?", (day,)).fetchall()
+        # Sources are logged under the date the command ran, which can be after the market session (a weekend run
+        # covers Friday). Show the latest run made on or after this session.
+        src_day = con.execute("SELECT MIN(date) FROM source_log WHERE date >= ?", (day,)).fetchone()[0] \
+            or con.execute("SELECT MAX(date) FROM source_log").fetchone()[0]
+        sources = con.execute("SELECT source, events, error FROM source_log WHERE date=?", (src_day,)).fetchall()
         status = {r["status"]: r["n"] for r in con.execute("SELECT status, COUNT(*) n FROM signals GROUP BY status")}
         open_positions = con.execute("SELECT COUNT(*) FROM book_positions").fetchone()[0]
     finally:
@@ -76,14 +80,14 @@ def build_report(db_path: str, date: str = None, run_exit: int = None) -> tuple:
         lines.append("! No session has been recorded in the database yet.")
     else:
         lines += [
-            f"Paper equity: {row['equity']:,.2f}",
+            f"Paper equity: {row['equity']:.4f} (starts at 1.0000; {row['equity'] - 1:+.2%} since the first session)",
             f"Gross exposure: {row['gross']:.1%}" if row["gross"] is not None else "Gross exposure: n/a",
             f"New picks today: {row['picks']}    Orders sized today: {row['orders']}",
             f"Fragility multiplier: {row['risk_mult']:.2f}" if row["risk_mult"] is not None else "Fragility: n/a",
             f"Open paper positions in the book: {open_positions}",
         ]
     lines += ["", "Signal status: " + (", ".join(f"{k} {v}" for k, v in sorted(status.items())) or "none")]
-    lines += ["", "Data sources:"]
+    lines += ["", f"Data sources (run of {src_day}):" if src_day else "Data sources:"]
     if not sources:
         lines.append("  (no source activity logged for this date)")
     for s in sources:
