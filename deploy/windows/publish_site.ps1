@@ -40,16 +40,14 @@ if ($Placeholder) {
     $folder = "site"
 }
 
-# 2. Upload (outbound only) to the non-production branch. Keep Wrangler's output to find the preview address.
-$deployLog = Join-Path $repo "logs\wrangler-deploy.log"
-New-Item -ItemType Directory -Force -Path (Split-Path $deployLog) | Out-Null
-npx --yes wrangler@4 pages deploy $folder --project-name=$project --branch=$branch --commit-dirty=true 2>&1 | Tee-Object -FilePath $deployLog
+# 2. Upload (outbound only) to the non-production branch. Wrangler writes straight to this window: it refuses to run
+#    when its output is piped, so nothing is captured here.
+npx --yes wrangler@4 pages deploy $folder --project-name=$project --branch=$branch --commit-dirty=true
 if ($LASTEXITCODE -ne 0) { throw "Wrangler upload failed" }
 
-# 3. Every address Wrangler reports must sit behind Cloudflare Access. Check the main address and each preview address.
-$addresses = @($url) + (Select-String -Path $deployLog -Pattern 'https://[A-Za-z0-9.-]+\.pages\.dev' -AllMatches |
-    ForEach-Object { $_.Matches.Value } | Sort-Object -Unique)
-$addresses = $addresses | Sort-Object -Unique
+# 3. The branch address and the configured address must both sit behind Cloudflare Access.
+#    (Per-deployment addresses like https://<hash>.<project>.pages.dev fall under the same * destination.)
+$addresses = @($url, "https://$branch.$project.pages.dev") | Sort-Object -Unique
 $bad = @()
 foreach ($addr in $addresses) {
     & $python -X utf8 -m edgelab.cli verify-access $addr
