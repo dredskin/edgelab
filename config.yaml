@@ -97,3 +97,12 @@ lab:
     max_substance: 0.35         # LLM substance score at or below this = hype headline
     horizon: 3
     feeds: []                   # RSS/Atom URLs of press-release or news feeds
+
+# E-mail the daily paper report (`edgelab email-report`). Only the server details live here. The recipient,
+# sender, login and app password come from the environment variables EDGELAB_MAIL_TO, EDGELAB_MAIL_FROM,
+# EDGELAB_SMTP_USER and EDGELAB_SMTP_PASSWORD (same Gmail account and app-password approach as TWIS).
+mail:
+  enabled: true
+  host: smtp.gmail.com
+  port: 587
+  security: starttls
