@@ -23,9 +23,19 @@ npx --yes wrangler@4 pages deploy site --project-name=$project --branch=main --c
 if ($LASTEXITCODE -ne 0) { throw "Wrangler upload failed" }
 
 # 3. The site must be behind Cloudflare Access. If it is not, say so loudly.
-& $python -X utf8 -m edgelab.cli verify-access $env:EDGELAB_PAGES_URL
-if ($LASTEXITCODE -ne 0) {
+# An empty URL is a configuration problem, not a finding about the site, so it gets its own message.
+$url = $env:EDGELAB_PAGES_URL
+if (-not $url) {
+    Write-Output "The upload finished, but EDGELAB_PAGES_URL is not set in THIS window, so Access could not be checked. Open a new PowerShell window and run the script again. Until the check passes, treat the site as unverified: open the address in a private browser window and confirm it asks you to log in."
+    exit 3
+}
+& $python -X utf8 -m edgelab.cli verify-access $url
+if ($LASTEXITCODE -eq 1) {
     Write-Output "The uploaded copy is reachable WITHOUT a login. Remove it now: Cloudflare dashboard > Workers & Pages > $project > Deployments, delete the latest one, and create the Access application for this hostname before publishing again."
     exit 2
 }
-Write-Output "Published and protected by Cloudflare Access: $env:EDGELAB_PAGES_URL"
+if ($LASTEXITCODE -ne 0) {
+    Write-Output "Access could not be verified (see the message above). The site may be fine; check it in a private browser window before trusting it."
+    exit 3
+}
+Write-Output "Published and protected by Cloudflare Access: $url"
