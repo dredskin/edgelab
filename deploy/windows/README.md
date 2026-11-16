@@ -28,8 +28,12 @@ Open a new PowerShell window afterwards so the variables load.
 ## 5. Test by hand, then schedule
     powershell -ExecutionPolicy Bypass -File deploy\windows\run_daily.ps1
     .venv\Scripts\python.exe -m edgelab.cli email-report --dry-run     # shows the e-mail without sending
-    powershell -ExecutionPolicy Bypass -File deploy\windows\register_task.ps1 -Time 18:30
+    powershell -ExecutionPolicy Bypass -File deploy\windows\register_task.ps1 -Time 18:30 -Publish -Background -Wake
     Start-ScheduledTask -TaskName EdgeLab-Daily                        # run it once now
+
+`-Background` runs the task whether or not you are logged on (register it from an **administrator** PowerShell
+window; your Windows password is not stored). `-Wake` wakes the PC from sleep for the run; a PC that is shut down
+cannot run it. Without `-Background` the task runs only while you are logged on.
 
 Add `-Execute` to both scripts only when you want orders sent to the broker's **paper** account. The broker
 settings and the paper-only checks are in `config.yaml`.
