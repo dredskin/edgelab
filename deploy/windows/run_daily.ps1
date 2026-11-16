@@ -4,6 +4,16 @@
 param([switch]$Execute, [switch]$Publish)
 
 $ErrorActionPreference = "Continue"
+
+# A background (S4U) task may start without your User environment variables. Load them from the registry so
+# the mail, Cloudflare and API settings are always visible; PATH is merged rather than replaced.
+foreach ($entry in [Environment]::GetEnvironmentVariables("User").GetEnumerator()) {
+    if ($entry.Key -eq "Path") {
+        $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + $entry.Value
+    } elseif (-not (Get-Item "env:$($entry.Key)" -ErrorAction SilentlyContinue)) {
+        Set-Item -Path "env:$($entry.Key)" -Value $entry.Value
+    }
+}
 $repo = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $python = Join-Path $repo ".venv\Scripts\python.exe"
 if (-not (Test-Path $python)) { throw "No virtual environment at $python. See deploy\windows\README.md step 2." }
