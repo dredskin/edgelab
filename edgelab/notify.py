@@ -10,6 +10,7 @@ Configuration split, so no private data is ever committed:
 The report is plain text. Text from filings and error messages is untrusted: control characters are stripped
 and it is never rendered as HTML, so nothing in it can run as code in a mail client.
 """
+import json
 import os
 import re
 import smtplib
@@ -70,6 +71,10 @@ def build_report(db_path: str, date: str = None, run_exit: int = None) -> tuple:
         sources = con.execute("SELECT source, events, error FROM source_log WHERE date=?", (src_day,)).fetchall()
         status = {r["status"]: r["n"] for r in con.execute("SELECT status, COUNT(*) n FROM signals GROUP BY status")}
         open_positions = con.execute("SELECT COUNT(*) FROM book_positions").fetchone()[0]
+        b = con.execute("SELECT value FROM meta WHERE key='broker_status'").fetchone()
+        broker = json.loads(b[0]) if b else None
+        if broker and broker.get("date") != day:
+            broker = None                             # only report the status recorded for this session
     finally:
         con.close()
 
@@ -86,6 +91,10 @@ def build_report(db_path: str, date: str = None, run_exit: int = None) -> tuple:
             f"Fragility multiplier: {row['risk_mult']:.2f}" if row["risk_mult"] is not None else "Fragility: n/a",
             f"Open paper positions in the book: {open_positions}",
         ]
+    if broker and not broker.get("ok"):
+        lines += ["", f"! BROKER UNAVAILABLE: no paper orders were sent. {broker.get('note', '')}"]
+    elif broker:
+        lines += ["", f"Broker: {broker.get('note', 'connected')}"]
     lines += ["", "Signal status: " + (", ".join(f"{k} {v}" for k, v in sorted(status.items())) or "none")]
     lines += ["", f"Data sources (run of {src_day}):" if src_day else "Data sources:"]
     if not sources:

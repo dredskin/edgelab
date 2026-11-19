@@ -127,3 +127,25 @@ def test_sources_logged_on_a_later_run_date_are_shown(tmp_path):
     _, body = notify.build_report(path)
     assert "edgar: 3 events, ok" in body and "run of 2026-11-15" in body
     assert "+0.20% since the first session" in body
+
+
+def test_broker_outage_is_flagged_for_its_session(db):
+    import json as _json
+    con = sqlite3.connect(db)
+    con.execute("INSERT OR REPLACE INTO meta VALUES('broker_status', ?)",
+                (_json.dumps({"date": "2027-01-04", "ok": False, "note": "ConnectionRefusedError: TWS not running"}),))
+    con.commit()
+    con.close()
+    _, body = notify.build_report(db, "2027-01-04")
+    assert "BROKER UNAVAILABLE" in body and "TWS not running" in body
+
+
+def test_old_broker_status_is_not_reported_for_a_new_session(db):
+    import json as _json
+    con = sqlite3.connect(db)
+    con.execute("INSERT OR REPLACE INTO meta VALUES('broker_status', ?)",
+                (_json.dumps({"date": "2026-12-31", "ok": False, "note": "old"}),))
+    con.commit()
+    con.close()
+    _, body = notify.build_report(db, "2027-01-04")
+    assert "BROKER" not in body

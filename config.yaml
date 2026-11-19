@@ -50,7 +50,7 @@ risk:
     floor: 0.25                 # never below 25% of normal exposure
 
 broker:
-  provider: alpaca              # alpaca | ibkr
+  provider: ibkr                # alpaca | ibkr
   base_url: https://paper-api.alpaca.markets   # Alpaca PAPER. Non-paper URLs are refused unless allow_live: true
   allow_live: false             # applies to every broker; keep false
   ibkr:                         # Interactive Brokers via TWS / IB Gateway on your machine
