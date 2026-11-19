@@ -191,10 +191,21 @@ def cmd_daily(cfg, args):
 
     broker, fx = None, {}
     if args.execute:
-        from .broker import make_broker
+        from .broker import BrokerSafetyError, make_broker
         from .data.fx import load_fx
-        broker = make_broker(cfg, db)
-        fx = load_fx({markets.currency(t) for t in panel.close.columns}, broker.base_ccy)
+        try:
+            broker = make_broker(cfg, db)
+            fx = load_fx({markets.currency(t) for t in panel.close.columns}, broker.base_ccy)
+            note_broker(db, session, ok=True, note=f"connected to {broker.name} paper account")
+        except BrokerSafetyError:
+            raise                                     # a paper-safety refusal must stop the run, never be skipped
+        except Exception as e:                        # e.g. TWS / IB Gateway not running: keep the research session
+            if broker and hasattr(broker, "close"):
+                broker.close()
+            broker = None
+            msg = f"{type(e).__name__}: {e}"[:300]
+            note_broker(db, session, ok=False, note=msg)
+            print(f"  ! BROKER UNAVAILABLE ({msg}). Research session continues; NO orders were sent.")
     try:
         run_session(cfg, db, panel, fetched, llm, build_signals(cfg), broker=broker, fx=fx, force=args.force)
     finally:
@@ -203,6 +214,19 @@ def cmd_daily(cfg, args):
     if llm.failed:
         print(f"  ! {llm.failed} LLM call(s) failed. Those documents were skipped; re-run `edgelab daily --date "
               f"{date.date()}` once the problem is fixed to score them.")
+
+
+def note_broker(db: str, session, ok: bool, note: str):
+    """Remember whether the broker could be reached for this session, so the e-mail report can say so."""
+    import sqlite3
+    con = sqlite3.connect(db)
+    try:
+        con.execute("CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT)")
+        con.execute("INSERT OR REPLACE INTO meta VALUES('broker_status', ?)",
+                    (json.dumps({"date": pd.Timestamp(session).strftime("%Y-%m-%d"), "ok": ok, "note": note}),))
+        con.commit()
+    finally:
+        con.close()
 
 
 def cmd_email_report(cfg, args):

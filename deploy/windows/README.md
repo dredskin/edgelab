@@ -75,3 +75,40 @@ dashboard, as of the last publish. It is paper trading data only. Anyone who cou
 positions, so keep the Access policy limited to you.
 
 Revoking access later: remove the Allow policy in Access, or delete the Pages project.
+
+## 7. Paper orders through Interactive Brokers
+
+EdgeLab sends orders only to an IB **paper** account. It refuses to connect unless BOTH the API port is a paper port
+(7497 for TWS, 4002 for IB Gateway) AND the account id starts with `DU`.
+
+1. **Install the IB connector** (once, from the repo folder):
+
+       .venv\Scripts\python.exe -m pip install -e ".[live,ibkr]"
+
+2. **Turn on the API in TWS or IB Gateway**, logged in to your **paper** account:
+   Configure > Settings > API > Settings:
+   - tick **Enable ActiveX and Socket Clients**
+   - **Socket port**: 7497 (TWS paper) or 4002 (Gateway paper)
+   - leave **Read-Only API** unticked (orders need it off)
+   - tick **Allow connections from localhost only**
+   If you use IB Gateway, change `broker.ibkr.port` in `config.yaml` to `4002`.
+
+3. **Base currency**: set `broker.ibkr.base_currency` in `config.yaml` to your paper account's base currency
+   (shown in TWS Account window, usually USD or CAD).
+
+4. **Check the connection** with TWS/Gateway running:
+
+       .venv\Scripts\python.exe -m edgelab.cli broker
+
+   It must print an account id starting with `DU` and `status paper`.
+
+5. **Turn on orders**: register the task again with `-Execute` (administrator window if you use `-Background`):
+
+       powershell -ExecutionPolicy Bypass -File deploy\windows\register_task.ps1 -Time 18:30 -Publish -Background -Wake -Execute
+
+**TWS or IB Gateway must be running and logged in at 6:30 pm.** IB logs it off once a day: in its settings, set the
+daily auto-restart (Lock and Exit / Auto restart) to a time that is not around 6:30 pm. If it is not running, the day
+is still researched and published, no orders are sent, and the e-mail says **BROKER UNAVAILABLE**.
+
+Orders are market orders sized by the paper book (quarter-Kelly, 5% cap, monthly loss cap and drawdown rules).
+EdgeLab only ever closes positions it opened itself.

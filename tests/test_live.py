@@ -174,3 +174,47 @@ def test_daily_command_runs_end_to_end_and_is_repeatable(tmp_path, monkeypatch, 
     assert readings > 50                                       # the gauge was warmed on history at first run
     cli.main(args + [panel.dates[-1].strftime("%Y-%m-%d")])    # same day again
     assert table(db, "SELECT COUNT(*) FROM daily")[0][0] == 3 and table(db, "SELECT COUNT(*) FROM fragility")[0][0] == readings
+
+
+def _daily_setup(tmp_path, monkeypatch):
+    import yaml
+    from edgelab.data import prices
+    cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
+    for s in cfg["sources"].values():
+        s["enabled"] = False
+    cfg["broker"]["provider"] = "ibkr"
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(cfg))
+    panel, _, _ = build_world(n_tickers=30, n_days=140, seed=2)
+    (tmp_path / "universe.txt").write_text("\n".join(panel.close.columns) + "\n")
+    monkeypatch.setattr(prices, "load_yfinance", lambda t, start, end=None: panel.upto(pd.Timestamp(end) - pd.Timedelta(days=1)))
+    return panel, ["--config", str(tmp_path / "config.yaml"), "daily", "--execute", "--date", panel.dates[-1].strftime("%Y-%m-%d")]
+
+
+def test_unreachable_broker_keeps_the_research_session_and_is_recorded(tmp_path, monkeypatch, capsys):
+    """TWS / IB Gateway not running: no orders, but the day is still researched and the outage is noted."""
+    import json
+    from edgelab import broker, cli
+    panel, args = _daily_setup(tmp_path, monkeypatch)
+
+    def refuse(cfg, db):
+        raise ConnectionRefusedError("TWS not running")
+    monkeypatch.setattr(broker, "make_broker", refuse)
+    cli.main(args)
+    out = capsys.readouterr().out
+    assert "BROKER UNAVAILABLE" in out and "NO orders were sent" in out
+    db = tmp_path / "edgelab.db"
+    assert table(db, "SELECT COUNT(*) FROM daily")[0][0] >= 1
+    status = json.loads(table(db, "SELECT value FROM meta WHERE key='broker_status'")[0][0])
+    assert status["ok"] is False and status["date"] == panel.dates[-1].strftime("%Y-%m-%d")
+
+
+def test_paper_safety_refusal_still_stops_the_run(tmp_path, monkeypatch):
+    """A live port or non-DU account must never be downgraded to 'broker unavailable'."""
+    from edgelab import broker, cli
+    _, args = _daily_setup(tmp_path, monkeypatch)
+
+    def unsafe(cfg, db):
+        raise broker.BrokerSafetyError("account U123 is not a paper account")
+    monkeypatch.setattr(broker, "make_broker", unsafe)
+    with pytest.raises(broker.BrokerSafetyError):
+        cli.main(args)
