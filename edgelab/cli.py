@@ -239,7 +239,8 @@ def note_broker(db: str, session, ok: bool, note: str):
 def cmd_email_report(cfg, args):
     from . import notify
     try:
-        print(notify.send_report(cfg, db_path(cfg, args), args.date, args.run_exit, dry_run=args.dry_run))
+        print(notify.send_report(cfg, db_path(cfg, args), args.date, args.run_exit, dry_run=args.dry_run,
+                                 html_out=args.html_out))
     except notify.MailError as e:
         sys.exit(f"e-mail not sent: {e}")
 
@@ -331,6 +332,7 @@ def main(argv=None):
     p.add_argument("--db")
     p.add_argument("--dry-run", action="store_true", help="print the report instead of sending it")
     p.add_argument("--run-exit", type=int, help="exit code of the daily run, shown in the report")
+    p.add_argument("--html-out", help="also save the HTML version to this file (for a look in a browser)")
     p = sub.add_parser("snapshot", help="write site/ (read-only JSON + dashboard) for Cloudflare Pages")
     p.add_argument("--db")
     p = sub.add_parser("verify-access", help="check that Cloudflare Access protects a hosted URL")
