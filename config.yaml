@@ -83,6 +83,7 @@ sources:
   announcements:                              # any RSS/Atom feed, any language; Claude classifies each item
     enabled: false
     feeds: []                                 # e.g. [{url: "https://...", default_suffix: ".L"}]
+  defense_contracts: {enabled: true}          # US: daily Pentagon contract awards of $7.5M+ (no key)
 supply_chain_file: supply_chain.yaml
 
 lab:
@@ -91,6 +92,10 @@ lab:
   large_stake:         {enabled: true, min_increase: 1.0, horizon: 30}   # stake up by >= 1 percentage point
   buyback:             {enabled: true, min_pct: 1.0, horizon: 20}        # >= 1% of shares outstanding
   supply_chain:        {enabled: true, min_accel: 0.10, min_abs_score: 0.5, horizon: 20}
+  # Added 2026-11-19, thresholds fixed before any results. Changing one later = a new entry name.
+  gov_contract:     {enabled: true, min_ratio: 0.02, horizon: 20}     # award >= 2% of a year's trading value
+  cascade_rebound:  {enabled: true, days: 3, min_drop: 0.15, min_sigma: 3.0, min_volume_x: 2.0, horizon: 5}
+  tax_loss_rebound: {enabled: true, start: "12-15", min_loss: 0.30, near_low: 0.15, horizon: 20}
   herding_fade:
     enabled: true
     gap_sigma: 2.0              # move must exceed 2x recent daily volatility

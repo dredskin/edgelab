@@ -74,16 +74,23 @@ def build_signals(cfg, demo=False):
         out.append(Buyback(lab["buyback"]))
     if on(lab, "supply_chain"):
         out.append(SupplyChainRead(lab["supply_chain"], load_supply_chain(cfg)))
+    # US-only lab entries from the cluster matrices. Another market would be a separate entry (e.g. *_intl).
+    from .lab.patterns import CascadeRebound, GovContract, TaxLossRebound
+    for key, cls in (("gov_contract", GovContract), ("cascade_rebound", CascadeRebound),
+                     ("tax_loss_rebound", TaxLossRebound)):
+        if on(lab, key):
+            out.append(cls({**lab[key], "scope": "us"}))
     return out
 
 
 def build_sources(cfg, db):
     from .sources.announcements import AnnouncementSource
     from .sources.asia import DartSource, TaiwanSalesSource
+    from .sources.defense import DefenseContractsSource
     from .sources.japan import EdinetSource, TdnetSource
     from .sources.us import EdgarSource
     table = {"edgar": EdgarSource, "edinet": EdinetSource, "tdnet": TdnetSource, "taiwan_sales": TaiwanSalesSource,
-             "dart": DartSource, "announcements": AnnouncementSource}
+             "dart": DartSource, "announcements": AnnouncementSource, "defense_contracts": DefenseContractsSource}
     return [cls(cfg, cfg["sources"][k], db) for k, cls in table.items() if cfg.get("sources", {}).get(k, {}).get("enabled")]
 
 
