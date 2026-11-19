@@ -149,3 +149,28 @@ def test_old_broker_status_is_not_reported_for_a_new_session(db):
     con.close()
     _, body = notify.build_report(db, "2027-01-04")
     assert "BROKER" not in body
+
+
+def test_html_report_escapes_untrusted_text_and_embeds_the_chart(db):
+    con = sqlite3.connect(db)
+    con.execute("INSERT INTO daily VALUES('2027-01-01', 1.0, 0.1, 1.0, 0.0, 0, 0)")
+    con.execute("INSERT INTO orders VALUES('2027-01-04', 'KAI', 'gov_contract', 0.03, '<img src=x onerror=alert(1)>')")
+    con.commit()
+    con.close()
+    cfg = {**CFG, "mail": {**CFG["mail"], "dashboard_url": "https://preview.example.pages.dev"}}
+    msg = notify.compose(cfg, db, "2027-01-04")
+    html_part = msg.get_body(("html",)).get_content()
+    assert "<img src=x" not in html_part and "&lt;img src=x" in html_part
+    assert "<b onclick" not in html_part                                   # source error text from the fixture
+    assert "cid:edgelab-trend" in html_part and "View EdgeLab Dashboard" in html_part
+    images = [p for p in msg.walk() if p.get_content_type() == "image/png"]
+    assert len(images) == 1 and images[0]["Content-ID"] == "<edgelab-trend>"
+    assert msg.get_body(("plain",)).get_content().startswith("EdgeLab daily report")
+
+
+def test_html_report_without_history_or_safe_link_still_renders(db):
+    cfg = {**CFG, "mail": {**CFG["mail"], "dashboard_url": "javascript:alert(1)"}}
+    msg = notify.compose(cfg, db, "2027-01-04")
+    html_part = msg.get_body(("html",)).get_content()
+    assert "javascript:" not in html_part and "two sessions" in html_part
+    assert not [p for p in msg.walk() if p.get_content_type() == "image/png"]
