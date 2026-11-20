@@ -55,7 +55,7 @@ broker:
   allow_live: false             # applies to every broker; keep false
   ibkr:                         # Interactive Brokers via TWS / IB Gateway on your machine
     host: 127.0.0.1
-    port: 7497                  # 7497 TWS paper, 4002 Gateway paper. Live ports are refused unless allow_live
+    port: 4002                  # IB Gateway paper (7497 = TWS paper). Live ports are refused unless allow_live
     client_id: 17
     account: ""                 # blank = first account on the connection; must start with DU (paper)
     base_currency: USD          # your account's base currency (e.g. CAD)
