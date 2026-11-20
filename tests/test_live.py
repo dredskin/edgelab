@@ -218,3 +218,20 @@ def test_paper_safety_refusal_still_stops_the_run(tmp_path, monkeypatch):
     monkeypatch.setattr(broker, "make_broker", unsafe)
     with pytest.raises(broker.BrokerSafetyError):
         cli.main(args)
+
+
+def test_zero_account_value_sends_no_orders(tmp_path, monkeypatch, capsys):
+    """An account that reads 0 is treated as unavailable: research continues, nothing is sized from 0."""
+    import json
+    from edgelab import broker, cli
+    _, args = _daily_setup(tmp_path, monkeypatch)
+
+    class Empty:
+        name, base_ccy = "ibkr", "USD"
+        def equity(self): return 0.0
+        def close(self): pass
+    monkeypatch.setattr(broker, "make_broker", lambda cfg, db: Empty())
+    cli.main(args)
+    assert "reads 0" in capsys.readouterr().out
+    status = json.loads(table(tmp_path / "edgelab.db", "SELECT value FROM meta WHERE key='broker_status'")[0][0])
+    assert status["ok"] is False

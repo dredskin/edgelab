@@ -25,6 +25,10 @@ class BrokerSafetyError(Exception):
     pass
 
 
+class BrokerError(Exception):
+    """A broker problem that is not a safety refusal (e.g. unreadable account values)."""
+
+
 class BrokerBase:
     name = "base"
 
@@ -257,15 +261,42 @@ class IBKRBroker(BrokerBase):
         if not self.allow_live and not self.acct.startswith("DU"):
             raise BrokerSafetyError(f"account {self.acct} is not a paper account (paper ids start with DU)")
 
+    def _raw_values(self) -> list:
+        """Account values from IB. The summary subscription can take a moment to fill after connecting, so wait up
+        to ~8 s for NetLiquidation; then fall back to the account-update values IB also streams."""
+        vals = []
+        for _ in range(16):
+            vals = list(self.ib.accountSummary(self.acct))
+            if any(v.tag == "NetLiquidation" for v in vals):
+                return vals
+            if hasattr(self.ib, "sleep"):
+                self.ib.sleep(0.5)
+            else:
+                break
+        if hasattr(self.ib, "accountValues"):
+            alt = [v for v in self.ib.accountValues(self.acct) if getattr(v, "account", self.acct) == self.acct]
+            if any(v.tag == "NetLiquidation" for v in alt):
+                return alt
+        return vals
+
     def _summary(self) -> dict:
-        out = {}
-        for v in self.ib.accountSummary(self.acct):
+        out, seen = {}, set()
+        for v in self._raw_values():
+            if v.tag == "NetLiquidation":
+                seen.add(v.currency or "?")
             if v.currency in (self.base_ccy, "BASE", ""):
                 try:
                     out[v.tag] = float(v.value)
                 except ValueError:
                     out[v.tag] = v.value
+        if "NetLiquidation" not in out and seen:
+            raise BrokerError(f"IB reports the account value in {sorted(seen)}, not {self.base_ccy}: set "
+                              "broker.ibkr.base_currency in config.yaml to the account's base currency")
         return out
+
+    def debug_values(self) -> list:
+        keep = {"NetLiquidation", "TotalCashValue", "AvailableFunds", "BuyingPower", "AccountType"}
+        return sorted((v.tag, str(v.value), v.currency) for v in self._raw_values() if v.tag in keep)
 
     def account(self) -> dict:
         s = self._summary()

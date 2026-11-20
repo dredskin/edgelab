@@ -202,6 +202,8 @@ def cmd_daily(cfg, args):
         from .data.fx import load_fx
         try:
             broker = make_broker(cfg, db)
+            if not broker.equity() > 0:               # sizing from a zero balance would be meaningless
+                raise RuntimeError("the paper account's value reads 0; check `edgelab broker --debug`")
             fx = load_fx({markets.currency(t) for t in panel.close.columns}, broker.base_ccy)
             note_broker(db, session, ok=True, note=f"connected to {broker.name} paper account")
         except BrokerSafetyError:
@@ -290,6 +292,9 @@ def cmd_broker(cfg, args):
     b = make_broker(cfg, db_path(cfg, args))
     try:
         a = b.account()
+        if getattr(args, "debug", False) and hasattr(b, "debug_values"):
+            for tag, value, ccy in b.debug_values():
+                print(f"  {tag:16s} {value:>18s} {ccy}")
         print(f"{b.name} account {a['id']}: equity {a['equity']:,.2f}, cash {a['cash']:,.2f}, status {a['status']}")
         for p in b.managed():
             print(f"  {p['side'].upper():4s} {p['qty']:>6} {p['ticker']:10s} [{p['signal']}] opened {p['opened']}, exits {p['exit_on']}")
@@ -325,8 +330,10 @@ def main(argv=None):
     p.add_argument("--days", type=int, default=365)
     p.add_argument("--end")
     p.add_argument("--db")
-    for name in ("broker", "report"):
-        sub.add_parser(name).add_argument("--db")
+    sub.add_parser("report").add_argument("--db")
+    p = sub.add_parser("broker", help="show the paper account and EdgeLab's positions")
+    p.add_argument("--db")
+    p.add_argument("--debug", action="store_true", help="also print the raw account values IB reports")
     p = sub.add_parser("email-report", help="e-mail the daily paper report (settings in config.yaml + environment)")
     p.add_argument("--date")
     p.add_argument("--db")
