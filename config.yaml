@@ -58,7 +58,7 @@ broker:
     port: 4002                  # IB Gateway paper (7497 = TWS paper). Live ports are refused unless allow_live
     client_id: 17
     account: ""                 # blank = first account on the connection; must start with DU (paper)
-    base_currency: USD          # your account's base currency (e.g. CAD)
+    base_currency: CAD          # paper account DUR357791 reports its value in CAD
   extra_tradable: []            # e.g. [".KS"] ONLY if your IB account really has Korea/Taiwan/India permission
   lot_sizes: {}                 # per-stock board lots IB requires, e.g. {"0700.HK": 100}
   allow_shorts: false           # long-only by default; shorting small-caps is costly and risky
