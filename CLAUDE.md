@@ -63,6 +63,8 @@ of a 13-expert design review. They are the point of the project, so follow them 
   as evidence about real markets.
 - Keep the dashboard talking only to `/api/*`, so web, desktop (Tauri) and mobile (Capacitor) wrappers keep working.
 - Secrets live in environment variables (`ANTHROPIC_API_KEY`, `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`, `EDINET_API_KEY`, `DART_API_KEY`), never in files.
+  Exception approved by the owner (2026-11-19): the IB **paper** login for IBC lives in Windows Credential Manager
+  (`edgelab-ibkr-paper`); it is written to disk only as a temporary owner-only file deleted once Gateway answers.
 
 ## Layout
 

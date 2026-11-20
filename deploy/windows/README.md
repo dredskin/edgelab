@@ -112,3 +112,27 @@ is still researched and published, no orders are sent, and the e-mail says **BRO
 
 Orders are market orders sized by the paper book (quarter-Kelly, 5% cap, monthly loss cap and drawdown rules).
 EdgeLab only ever closes positions it opened itself.
+
+## 8. Automatic IB Gateway login (IBC, paper only)
+
+IBC fills in Gateway's login for you. Your IB **paper** username and password are kept in Windows Credential
+Manager, not in any file. When Gateway starts, a temporary settings file readable only by your Windows account is
+written and deleted as soon as Gateway answers (at most 3 minutes). Trading mode is always paper, port 4002.
+
+IBC was retired by its author on 1 Sept 2026; its last release (3.24.2) supports Gateway 10.48 and later. If a
+future Gateway update breaks it, you will see BROKER UNAVAILABLE in the e-mail and can log in by hand meanwhile.
+
+1. **Install IBC**: download `IBCWin-3.24.2.zip` from https://github.com/IbcAlpha/IBC/releases/latest and unzip it
+   to `C:\IBC` (so that `C:\IBC\scripts\StartIBC.bat` exists).
+2. **Use the offline (stable) Gateway** installed in `C:\Jts` (the self-updating installer is not supported by IBC).
+3. **Update the Python packages**: `.venv\Scripts\python.exe -m pip install -e ".[live,ibkr]"`
+4. **Save your PAPER login** (prompts; the password is not shown):
+
+       .venv\Scripts\python.exe -m edgelab.cli ib-gateway save-login
+
+5. **Close Gateway if it is open**, then test: `.venv\Scripts\python.exe -m edgelab.cli ib-gateway start`
+   Gateway should open and log in by itself within a few minutes, then `edgelab broker` shows the DU account.
+6. **Keep it running automatically**: `powershell -ExecutionPolicy Bypass -File deploy\windows\register_ibgateway_task.ps1`
+
+To remove the saved login: Windows Credential Manager > Windows Credentials > `edgelab-ibkr-paper` > Remove.
+Log of each start: `logs\ibgateway.log`; IBC's own log: `C:\IBC\Logs`.

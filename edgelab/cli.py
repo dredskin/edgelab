@@ -238,6 +238,20 @@ def note_broker(db: str, session, ok: bool, note: str):
         con.close()
 
 
+def cmd_ib_gateway(cfg, args):
+    from . import ibgateway
+    try:
+        if args.action == "save-login":
+            user = ibgateway.save_login()
+            print(f"Saved the IB paper login for {user} in Windows Credential Manager ({ibgateway.SERVICE}).")
+        elif args.action == "status":
+            print("running" if ibgateway.port_open() else "not running", f"(port {ibgateway.PORT})")
+        else:
+            print(ibgateway.ensure_running(cfg))
+    except ibgateway.GatewayError as e:
+        sys.exit(f"IB Gateway: {e}")
+
+
 def cmd_email_report(cfg, args):
     from . import notify
     try:
@@ -331,6 +345,8 @@ def main(argv=None):
     p.add_argument("--end")
     p.add_argument("--db")
     sub.add_parser("report").add_argument("--db")
+    p = sub.add_parser("ib-gateway", help="start IB Gateway with the saved PAPER login (IBC), or save that login")
+    p.add_argument("action", choices=["start", "status", "save-login"])
     p = sub.add_parser("broker", help="show the paper account and EdgeLab's positions")
     p.add_argument("--db")
     p.add_argument("--debug", action="store_true", help="also print the raw account values IB reports")
@@ -356,7 +372,7 @@ def main(argv=None):
     {"demo": cmd_demo, "daily": cmd_daily, "backfill": cmd_backfill, "report": cmd_report, "serve": cmd_serve,
      "broker": cmd_broker,
      "email-report": cmd_email_report, "snapshot": cmd_snapshot, "verify-access": cmd_verify_access,
-     "verify-empty": cmd_verify_empty}[a.cmd](cfg, a)
+     "verify-empty": cmd_verify_empty, "ib-gateway": cmd_ib_gateway}[a.cmd](cfg, a)
 
 
 if __name__ == "__main__":
