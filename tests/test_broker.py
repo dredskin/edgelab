@@ -157,3 +157,38 @@ def test_alpaca_only_trades_us(tmp_path):
 def test_global_headline_detection():
     from edgelab.lab.headlines import detect_tickers
     assert detect_tickers("トヨタ（TYO: 7203）が発表; Tencent (HKEX: 700); BP (LSE: BP.)") == {"7203.T", "0700.HK", "BP.L"}
+
+
+class SlowIB(FakeIB):
+    """IB's account summary is empty for the first moments after connecting."""
+    def __init__(self, empty_reads=3, **kw):
+        super().__init__(**kw)
+        self.reads, self.empty_reads = 0, empty_reads
+
+    def accountSummary(self, acct):
+        self.reads += 1
+        return [] if self.reads <= self.empty_reads else super().accountSummary(acct)
+
+
+def test_ibkr_waits_for_account_values(tmp_path):
+    b = IBKRBroker(ibcfg(4002), str(tmp_path / "a.db"), SlowIB())
+    assert b.account()["equity"] == 50000
+
+
+def test_ibkr_falls_back_to_account_updates(tmp_path):
+    class UpdatesOnly(SlowIB):
+        def accountValues(self, acct):
+            return [NS(tag="NetLiquidation", value="1000000", currency="USD", account=acct)]
+    b = IBKRBroker(ibcfg(4002), str(tmp_path / "a.db"), UpdatesOnly(empty_reads=999))
+    assert b.equity() == 1_000_000
+
+
+def test_ibkr_names_a_base_currency_mismatch(tmp_path):
+    from edgelab.broker import BrokerError
+
+    class Cad(FakeIB):
+        def accountSummary(self, acct):
+            return [NS(tag="NetLiquidation", value="1000000", currency="CAD")]
+    b = IBKRBroker(ibcfg(4002), str(tmp_path / "a.db"), Cad())
+    with pytest.raises(BrokerError, match="CAD"):
+        b.equity()
